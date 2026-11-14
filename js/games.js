@@ -117,7 +117,7 @@ function frameOf(v) {
   return { x0: (v.w - W) / 2, y0, W, H };
 }
 function title(ctx, F, text) {
-  ctx.fillStyle = '#0007'; ctx.font = '800 16px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#0007'; ctx.font = '800 20px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText(text, F.x0 + 20, F.y0 + 22);
 }
 function room(ctx, F, m) {
@@ -202,9 +202,9 @@ function drawOrder(ctx, v, F) {
   }
   const nx = R.fx(0.1), ny = R.floorY + 6;
   emoji(ctx, m.face, nx, ny - 8 + Math.sin(t * 3) * 2, 78);
-  ctx.font = '800 13px system-ui'; ctx.fillStyle = '#0007'; ctx.textAlign = 'center'; ctx.fillText(m.who, nx, ny + 54);
+  ctx.font = '800 16px system-ui'; ctx.fillStyle = '#0007'; ctx.textAlign = 'center'; ctx.fillText(m.who, nx, ny + 54);
   emoji(ctx, '🧺', R.fx(0.24), ny + 30 - Math.max(0, 0.25 - v.pop) * 60, 50);
-  ctx.font = '800 13px system-ui'; ctx.fillStyle = '#0007'; ctx.fillText(`${Math.min(6, v.placed)} of 6`, R.fx(0.24), ny + 66);
+  ctx.font = '800 16px system-ui'; ctx.fillStyle = '#0007'; ctx.fillText(`${Math.min(6, v.placed)} of 6`, R.fx(0.24), ny + 66);
   v.drawMe(R.fx(0.52), R.fy(0.6));
 }
 

@@ -87,7 +87,7 @@ export function drawInterior(ctx, v) {
   ctx.fillStyle = '#bfe6ff'; ctx.fillRect(x0 + W - 250, y0 + 34, 90, 70);
   ctx.strokeStyle = '#fff'; ctx.lineWidth = 6; ctx.strokeRect(x0 + W - 250, y0 + 34, 90, 70);
   emoji(ctx, '☁️', x0 + W - 215 + Math.sin(t * 0.4) * 12, y0 + 60, 22);
-  ctx.fillStyle = '#0006'; ctx.font = '800 16px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#0006'; ctx.font = '800 20px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText(m.title.toUpperCase(), x0 + 20, y0 + 22);
 
   const done = v.placed >= m.items.length;
@@ -115,7 +115,7 @@ export function drawInterior(ctx, v) {
   const nx = fx(0.1), ny = floorY + 6;
   ctx.fillStyle = '#0003'; ctx.beginPath(); ctx.ellipse(nx, ny + 34, 30, 8, 0, 0, 7); ctx.fill();
   emoji(ctx, m.face, nx, ny - 8 + Math.sin(t * 3) * 2, 78);
-  ctx.font = '800 13px system-ui'; ctx.fillStyle = '#0007'; ctx.textAlign = 'center';
+  ctx.font = '800 16px system-ui'; ctx.fillStyle = '#0007'; ctx.textAlign = 'center';
   ctx.fillText(m.who, nx, ny + 54);
   emoji(ctx, '🚪', fx(0.95), floorY - 34, 60);
 
@@ -125,15 +125,15 @@ export function drawInterior(ctx, v) {
   floorItems.filter(s => s.y > v.y).forEach(drawItem);
 
   if (v.talk > 0) {
-    ctx.font = '600 15px system-ui';
-    const lines = wrap(ctx, done ? m.thanks : m.ask, Math.min(300, W * 0.4));
-    const bw = Math.max(...lines.map(l => ctx.measureText(l).width)) + 24, bh = lines.length * 20 + 16;
+    ctx.font = '600 18px system-ui';
+    const lines = wrap(ctx, done ? m.thanks : m.ask, Math.min(340, W * 0.45));
+    const bw = Math.max(...lines.map(l => ctx.measureText(l).width)) + 24, bh = lines.length * 24 + 16;
     const bx = Math.max(x0 + 8, nx - 30), by = ny - 70 - bh;
     ctx.globalAlpha = Math.min(1, v.talk * 2);
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 12); ctx.fill();
     ctx.beginPath(); ctx.moveTo(nx - 6, by + bh - 1); ctx.lineTo(nx + 4, by + bh + 12); ctx.lineTo(nx + 16, by + bh - 1); ctx.fill();
     ctx.fillStyle = '#2b2340'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    lines.forEach((l, i) => ctx.fillText(l, bx + 12, by + 18 + i * 20));
+    lines.forEach((l, i) => ctx.fillText(l, bx + 12, by + 20 + i * 24));
     ctx.globalAlpha = 1;
   }
 }

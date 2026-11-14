@@ -9,7 +9,7 @@ import * as G from './games.js';
 import DATA from './content-data.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14d';
+const BUILD = '2026-11-14e';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -102,7 +102,7 @@ function toast(text, cls = '') {
   const el = document.createElement('div');
   el.className = 'toast ' + cls; el.textContent = text;
   $('toasts').appendChild(el);
-  while ($('toasts').children.length > 4) $('toasts').firstChild.remove();
+  while ($('toasts').children.length > 2) $('toasts').firstChild.remove(); // never a wall of messages
   setTimeout(() => el.remove(), 4200);
 }
 function floatText(text, x, y, color, size) { fx.push({ text, x, y, vx: 0, vy: -40, life: 1.2, color, size }); }
@@ -166,7 +166,6 @@ function fingerOf(c) {
   for (let r = 0; r < 4; r++) { const i = rows[r][0].indexOf(c); if (i >= 0) return FINGERS[FING[r][i]]; }
   return '';
 }
-const KEY_PITCH = 34; // key width plus gap, in px (matches style.css)
 const keyEl = {}; // char -> { el, shift, right }
 let kbShown = null, kbNext = null;
 function buildKb() {
@@ -177,7 +176,7 @@ function buildKb() {
     const fing = FING[r];
     const row = document.createElement('div'); row.className = 'r';
     // real keyboards stagger the rows: Q sits 1.5 keys in, A 1.75, Z 2.25
-    row.style.paddingLeft = [0, 1.5, 1.75, 0][r] * KEY_PITCH + 'px';
+    row.style.paddingLeft = `calc(var(--kp) * ${[0, 1.5, 1.75, 0][r]})`; // --kp: key width plus gap (style.css)
     const add = (label, cls) => { const k = document.createElement('div'); k.className = 'k ' + cls; k.textContent = label; row.appendChild(k); return k; };
     if (r === 3) keyEl.shiftL = add('shift', 'wide f0');
     [...lo].forEach((c, i) => {
@@ -189,7 +188,7 @@ function buildKb() {
     kb.appendChild(row);
   });
   const row = document.createElement('div'); row.className = 'r';
-  row.style.paddingLeft = 4 * KEY_PITCH + 'px';
+  row.style.paddingLeft = 'calc(var(--kp) * 4)';
   const sp = document.createElement('div'); sp.className = 'k space f8 on'; sp.textContent = 'space';
   row.appendChild(sp); kb.appendChild(row);
   keyEl[' '] = { el: sp, shift: false, right: false };
@@ -309,8 +308,8 @@ function dealChoices() {
   CH.opts = opts; CH.buf = ''; CH.clean = true;
   T.errs = new Set(); T.miss = 0; T.shown = performance.now();
   $('panel').classList.remove('again');
-  $('hint').textContent = (m.game === 'maze' ? 'Which way? Type the word next to an arrow to go that way.'
-    : `${m.who} wants ${m.items[g.seq[inside.placed]]} next. Find it and type its word.`) + '  (Esc to stop)';
+  $('hint').textContent = (m.game === 'maze' ? 'Which way? Type the word by an arrow.'
+    : `${m.who} wants ${m.items[g.seq[inside.placed]]}. Type its word.`) + '  (Esc to stop)';
   paintChoices();
 }
 function paintChoices() {
@@ -809,14 +808,14 @@ function updatePrompt() {
       setPrompt(p, { prompt: $('prompt'), found: $('found') }, finishPrompt);
       $('panel').classList.toggle('again', !!p.redo);
       tip('type');
-      $('hint').textContent = (p.redo ? '↩ Second chance: type this one with no slips to deliver it.'
-        : lastSlip ? 'That one had a slip, so its dot turned purple and it will come back.'
+      $('hint').textContent = (p.redo ? '↩ Try this one again with no slips.'
+        : lastSlip ? 'Oops, a slip. That one will come back.'
           : c.job ? JOBS[c.job.t].hint
           : inside ? (inside.m.game === 'run' ? 'Type it to get past!' : `Type to bring in the next thing for ${inside.m.who}.`)
         : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
             : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
               : p.perfect ? 'Perfect run: one slip sends you back to the start.'
-                : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : 'Type it to deliver a load of bricks.') + '  (Esc to stop)';
+                : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : 'Type it to deliver bricks.') + '  (Esc to stop)';
     }
     return c.zone;
   }
@@ -839,8 +838,8 @@ function updatePrompt() {
   else if (c.job) hint = `Press Enter to help. ${JOBS[c.job.t].hint}`;
   else if (c.base) hint = 'Press Enter to start building here.';
   else if (doorId && jobIn(doorId)) hint = `${JOBS[jobIn(doorId).t].icon} Trouble inside! Press Enter to go in and help.`;
-  else if (doorId) hint = P.rooms[doorId] >= 6 ? '🚪 Press Enter to visit.' : '🚪 Someone inside needs help! Press Enter to go in.';
-  else hint = 'Walk to a glowing circle with the arrow keys, or press Enter to go to the nearest one.';
+  else if (doorId) hint = P.rooms[doorId] >= 6 ? '🚪 Press Enter to visit.' : '🚪 Press Enter to go in and help.';
+  else hint = 'Walk to a glowing circle. Press Enter for the nearest one.';
   $('hint').textContent = hint;
   return c.zone;
 }
@@ -923,17 +922,20 @@ function updateHud(now) {
   hudAt = now;
   const D = district(st.d);
   const left = D.sites.filter((s, k) => st.have[k] < s.need).length;
-  $('district').textContent = `🏙️ ${D.name}: ${6 - left} of 6 built`;
+  $('district').textContent = `🏙️ ${D.name}  ${6 - left}/6`;
   const r = S.ROLES[myRole()];
   $('role').textContent = `Your job: ${r.icon} ${r.name}`;
   $('combo').style.width = Math.min(100, st.combo * 100) + '%';
   $('bossbar').classList.toggle('hidden', !st.boss);
   if (st.boss) { $('bosshp').style.width = st.boss.hp / st.boss.max * 100 + '%'; $('bosstxt').textContent = `TYPO MONSTER · ${Math.ceil(st.boss.left)}s`; }
   const done = Math.min(S.SHIFT_LESSONS, P.day.lessons);
-  $('shift').textContent = P.pacing ? `Today ${'⭐'.repeat(done)}${'☆'.repeat(S.SHIFT_LESSONS - done)}` : `Lessons today: ${P.day.lessons}`;
+  $('shift').textContent = P.pacing ? `⭐ ${done}/${S.SHIFT_LESSONS}` : `⭐ ${P.day.lessons}`;
   const pw = [P.shields ? `🛡️×${P.shields}` : '', P.crane ? `🏗️×${P.crane}` : '', now < bootsUntil ? '👟' : '', P.streak >= 3 ? `🔥${P.streak}` : ''].filter(Boolean).join('  ');
   $('powers').textContent = pw; $('powers').classList.toggle('hidden', !pw);
-  $('crew').textContent = !net.ready ? '🔎 looking for builders…' : `👷 ${1 + liveOthers(now).length} in ${roomLabel}` + (net.isHost && others.size ? ' ★' : '');
+  const crew = liveOthers(now).length;
+  $('crew').textContent = !net.ready ? '🔎' : `👷 ${1 + crew}`;
+  $('crew').title = `Builders in ${roomLabel}` + (net.isHost && crew ? ' (this device is keeping the city)' : '');
+  $('comboBox').classList.toggle('hidden', !crew); // the team meter only matters with a team
   $('btnSound').textContent = P.sound ? '🔊' : '🔇';
 }
 

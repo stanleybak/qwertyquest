@@ -67,8 +67,8 @@ function drawGround(ctx, v) {
         ctx.stroke();
       }
     }
-    ctx.fillStyle = '#0005'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(D.name.toUpperCase(), x, y - CELL_H / 2 + 34);
+    ctx.fillStyle = '#0006'; ctx.font = '800 19px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(D.name.toUpperCase(), x, y - CELL_H / 2 + 36);
   }
   // the next district: visible, but locked
   const N = district(st.d + 1);
@@ -136,10 +136,10 @@ function drawBuilding(ctx, s, have, x, y, t, active) {
     if (s.env === 'snow') { ctx.fillStyle = '#fff'; rr(ctx, x - W / 2 - 8, y - H - 7, W + 16, 12, 6); ctx.fill(); } // snow on the roof
     if (s.kind === 3) emoji(ctx, '🚩', x + 6, y - H - 48 + Math.sin(t * 3) * 2, 26);
   } else if (active) {
-    const bw = 76, by = y - H - 20;
-    ctx.fillStyle = '#fff'; rr(ctx, x - bw / 2, by - 9, bw, 18, 9); ctx.fill();
-    ctx.fillStyle = '#ff8a3d'; rr(ctx, x - bw / 2 + 2, by - 7, Math.max(6, (bw - 4) * have / s.need), 14, 7); ctx.fill();
-    ctx.fillStyle = '#2b2340'; ctx.font = '700 12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    const bw = 100, by = y - H - 24;
+    ctx.fillStyle = '#fff'; rr(ctx, x - bw / 2, by - 13, bw, 26, 13); ctx.fill();
+    ctx.fillStyle = '#ffb27a'; rr(ctx, x - bw / 2 + 3, by - 10, Math.max(8, (bw - 6) * have / s.need), 20, 10); ctx.fill();
+    ctx.fillStyle = '#2b2340'; ctx.font = '800 16px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(`${have}/${s.need} 🧱`, x, by + 1);
   }
 }
