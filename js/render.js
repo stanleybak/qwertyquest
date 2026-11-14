@@ -4,6 +4,13 @@ import { district, CELL_W, CELL_H, ZONE_R, JOBS } from './world.js';
 export const COLORS = ['#ff6b6b', '#ff9f43', '#feca57', '#1dd1a1', '#48dbfb', '#5f7cff', '#c56cf0', '#ff78c4'];
 const ITEM_EMOJI = ['🛡️', '🏗️', '👟'];
 const FLOOR_H = 28;
+// How each kind of neighborhood looks: ground while building, ground when finished, road, river.
+const LOOK = {
+  town: ['#f3e2b8', '#e9dcc0', '#b9b3a8', '#5db7f0'], farm: ['#e6d795', '#dccd8c', '#c9a877', '#5db7f0'],
+  forest: ['#bfe0a3', '#b3d697', '#c2a274', '#4fa9d8'], city: ['#e0ddd6', '#d5d2cb', '#8f8c88', '#5db7f0'],
+  beach: ['#f9e9ad', '#f2e1a3', '#c79a62', '#3fc1d9'], snow: ['#f6fafd', '#eaf1f7', '#cfdde8', '#bfe3f5'],
+};
+const TRAFFIC = { town: ['🚗', '🚌'], city: ['🚕', '🚗', '🚚'], farm: ['🚜'], beach: ['🚲'], snow: [], forest: [] };
 
 function emoji(ctx, e, x, y, size) {
   if (!e) return;
@@ -31,10 +38,11 @@ function drawGround(ctx, v) {
     const D = district(i);
     if (!vis(D)) continue;
     const x = D.cx - cam.x + w / 2, y = D.cy - cam.y + h / 2;
-    ctx.fillStyle = i === st.d ? '#f3e2b8' : '#e9dcc0';
+    const look = LOOK[D.env] || LOOK.town, paved = D.env === 'town' || D.env === 'city';
+    ctx.fillStyle = i === st.d ? look[0] : look[1];
     rr(ctx, x - CELL_W / 2 + 14, y - CELL_H / 2 + 14, CELL_W - 28, CELL_H - 28, 36); ctx.fill();
     if (D.river) {
-      ctx.fillStyle = '#5db7f0';
+      ctx.fillStyle = look[3];
       ctx.fillRect(x - CELL_W / 2 + 14, y + 18, CELL_W - 28, 48);
       ctx.strokeStyle = '#fff8'; ctx.lineWidth = 2;
       for (let k = 0; k < 9; k++) {
@@ -47,11 +55,17 @@ function drawGround(ctx, v) {
         for (let k = -60; k <= 60; k += 20) { ctx.beginPath(); ctx.moveTo(x + k, y + 12); ctx.lineTo(x + k, y + 72); ctx.stroke(); }
       }
     } else {
-      ctx.fillStyle = '#b9b3a8';
+      ctx.fillStyle = look[2];
       ctx.fillRect(x - CELL_W / 2 + 14, y + 20, CELL_W - 28, 44);
-      ctx.strokeStyle = '#fff9'; ctx.lineWidth = 3; ctx.setLineDash([18, 16]);
-      ctx.beginPath(); ctx.moveTo(x - CELL_W / 2 + 30, y + 42); ctx.lineTo(x + CELL_W / 2 - 30, y + 42); ctx.stroke();
-      ctx.setLineDash([]);
+      if (paved) { // lane markings
+        ctx.strokeStyle = '#fff9'; ctx.lineWidth = 3; ctx.setLineDash([18, 16]);
+        ctx.beginPath(); ctx.moveTo(x - CELL_W / 2 + 30, y + 42); ctx.lineTo(x + CELL_W / 2 - 30, y + 42); ctx.stroke();
+        ctx.setLineDash([]);
+      } else if (D.env === 'beach') { // boardwalk planks
+        ctx.strokeStyle = '#0002'; ctx.lineWidth = 2; ctx.beginPath();
+        for (let k = -CELL_W / 2 + 40; k < CELL_W / 2 - 20; k += 26) { ctx.moveTo(x + k, y + 20); ctx.lineTo(x + k, y + 64); }
+        ctx.stroke();
+      }
     }
     ctx.fillStyle = '#0005'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(D.name.toUpperCase(), x, y - CELL_H / 2 + 34);
@@ -119,6 +133,7 @@ function drawBuilding(ctx, s, have, x, y, t, active) {
     if (s.roof === 0) { ctx.beginPath(); ctx.moveTo(x - W / 2 - 8, y - H); ctx.lineTo(x, y - H - 34); ctx.lineTo(x + W / 2 + 8, y - H); ctx.fill(); }
     else if (s.roof === 1) ctx.fillRect(x - W / 2 - 5, y - H - 10, W + 10, 10);
     else { ctx.beginPath(); ctx.ellipse(x, y - H, W / 2, 26, 0, Math.PI, 0); ctx.fill(); }
+    if (s.env === 'snow') { ctx.fillStyle = '#fff'; rr(ctx, x - W / 2 - 8, y - H - 7, W + 16, 12, 6); ctx.fill(); } // snow on the roof
     if (s.kind === 3) emoji(ctx, '🚩', x + 6, y - H - 48 + Math.sin(t * 3) * 2, 26);
   } else if (active) {
     const bw = 76, by = y - H - 20;
@@ -188,32 +203,36 @@ export function drawPlayer(ctx, p, x, y, t) {
 
 /** A city problem: fire, leak, stuck kitten, or brick thief. */
 function drawJob(ctx, j, x, y, t, near) {
-  const f = j.hp / j.max;
-  let top = y - 70;
-  if (j.t === 0) {
+  const f = j.hp / j.max, J = JOBS[j.t], art = (J.v[j.v | 0] || J.v[0]).art;
+  let top = y - 76;
+  if (J.name === 'fire') {
     top = y - j.h - 60;
     for (let k = 0; k < 3; k++) emoji(ctx, '🔥', x + (k - 1) * 30, y - j.h - 6 + Math.sin(t * 9 + k * 2) * 4, 22 + 26 * f);
     emoji(ctx, '💨', x + Math.sin(t) * 20, y - j.h - 50 - (t * 30 % 30), 22);
-  } else if (j.t === 1) {
+  } else if (J.kind === 'in') {
     for (let k = 0; k < 4; k++) emoji(ctx, '💦', x + 40 + Math.sin(t * 5 + k) * 14, y - 14 - ((t * 60 + k * 17) % 50) * f, 14 + 12 * f);
     ctx.fillStyle = '#5db7f099'; ctx.beginPath(); ctx.ellipse(x + 40, y + 8, 30 + 26 * f, 9, 0, 0, 7); ctx.fill();
-  } else if (j.t === 2) {
-    emoji(ctx, '🌳', x, y - 44, 96);
-    emoji(ctx, '🐱', x + 8, y - 84 + (1 - f) * 50 + Math.sin(t * 5) * 2, 26);
+  } else if (J.bg) { // something stuck up high: it comes down as the work gets done
+    emoji(ctx, J.bg, x, y - 44, 96);
+    emoji(ctx, art, x + 8, y - 84 + (1 - f) * 50 + Math.sin(t * 5) * 2, 26);
     emoji(ctx, '🪜', x + 30, y - 22, 40);
     top = y - 116;
-  } else {
+  } else if (J.kind === 'run') {
     const run = j.stun > 0 ? 0 : Math.abs(Math.sin(t * 12)) * 6;
     ctx.fillStyle = '#0003'; ctx.beginPath(); ctx.ellipse(x, y, 16, 6, 0, 0, 7); ctx.fill();
-    emoji(ctx, '🦹', x, y - 26 - run, 44);
-    emoji(ctx, '🧱', x + 20, y - 14 - run, 18);
+    emoji(ctx, art, x, y - 26 - run, 44);
+    if (J.name === 'thief') emoji(ctx, '🧱', x + 20, y - 14 - run, 18);
     if (j.stun > 0) emoji(ctx, '💫', x, y - 58, 20);
+  } else {
+    ctx.fillStyle = '#0003'; ctx.beginPath(); ctx.ellipse(x, y + 2, 34, 9, 0, 0, 7); ctx.fill();
+    emoji(ctx, art, x, y - 28 + Math.sin(t * 3) * 2, 60);
+    emoji(ctx, '❗', x + 34, y - 58 + Math.sin(t * 6) * 3, 20);
   }
   const bw = 70;
   ctx.fillStyle = '#fff'; rr(ctx, x - bw / 2, top - 9, bw, 18, 9); ctx.fill();
   ctx.fillStyle = '#e5484d'; rr(ctx, x - bw / 2 + 2, top - 7, Math.max(6, (bw - 4) * f), 14, 7); ctx.fill();
   emoji(ctx, JOBS[j.t].icon, x - bw / 2 - 10, top, 20);
-  if (j.t !== 3) drawZone(ctx, x + (j.px - j.x), y + (j.py - j.y), near, t);
+  if (JOBS[j.t].kind !== 'run') drawZone(ctx, x + (j.px - j.x), y + (j.py - j.y), near, t);
 }
 
 function drawBoss(ctx, b, x, y, t, weak, hit) {
@@ -272,6 +291,21 @@ export function draw(ctx, v) {
           emoji(ctx, fin ? '⭐' : '❗', sx(s.x), by + 1, fin ? 24 : 18);
           emoji(ctx, '🚪', sx(s.x) + s.w / 2 - 18, sy(s.y) - 14, 0.1); // warm the glyph cache
         }
+      } });
+    });
+  }
+  for (let i = 0; i <= st.d; i++) {
+    const D = district(i);
+    if (Math.abs(D.cx - cam.x) > w / 2 + CELL_W || Math.abs(D.cy - cam.y) > h / 2 + CELL_H) continue;
+    for (const o of D.decor) things.push({ y: o.y, f: () => emoji(ctx, o.e, sx(o.x), sy(o.y) - 18, 40) });
+    // traffic rolls along the road
+    const cars = D.river ? [] : TRAFFIC[D.env] || [], span = CELL_W - 120;
+    cars.forEach((e, k) => {
+      const dir = k % 2 ? 1 : -1, u = ((t * (34 + k * 9) + k * 310 + i * 97) % span + span) % span;
+      const x = D.cx + dir * (u - span / 2), y = D.cy + (dir > 0 ? 54 : 34);
+      things.push({ y, f: () => {
+        ctx.save(); ctx.translate(sx(x), sy(y) - 16); ctx.scale(-dir, 1); // these pictures face left
+        emoji(ctx, e, 0, 0, 38); ctx.restore();
       } });
     });
   }

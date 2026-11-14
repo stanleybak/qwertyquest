@@ -8,7 +8,7 @@ import { draw, drawPlayer, COLORS } from './render.js';
 import * as G from './games.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14b';
+const BUILD = '2026-11-14c';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -73,7 +73,7 @@ function say(text) {
   } catch { /* no speech */ }
 }
 const vol = () => Math.min(1, P.vol * 1.3);
-const KEY_NAMES = { ';': 'semicolon', ',': 'comma', '.': 'period', '/': 'slash', ' ': 'space' };
+const KEY_NAMES = { ';': 'semicolon', ',': 'comma', '.': 'period', '/': 'slash', ' ': 'space', '\'': 'apostrophe' };
 // letter drills: say just the next letter, by name
 function sayLetter(c) {
   if (!P.sound || !P.vol || Voice.busy('npc')) return;
@@ -113,25 +113,49 @@ function confetti(x, y, n = 40) {
 }
 
 // ---------- keyboard guide ----------
-const KB = [
-  ['`1234567890-=', '~!@#$%^&*()_+', [0, 0, 1, 2, 3, 3, 4, 4, 5, 6, 7, 7, 7]],
-  ['qwertyuiop[]\\', 'QWERTYUIOP{}|', [0, 1, 2, 3, 3, 4, 4, 5, 6, 7, 7, 7, 7]],
-  ['asdfghjkl;\'', 'ASDFGHJKL:"', [0, 1, 2, 3, 3, 4, 4, 5, 6, 7, 7]],
-  ['zxcvbnm,./', 'ZXCVBNM<>?', [0, 1, 2, 3, 3, 4, 4, 5, 6, 7]],
+// Each row: unshifted keys, shifted keys, which finger presses each. Both layouts share the fingers.
+const FING = [[0, 0, 1, 2, 3, 3, 4, 4, 5, 6, 7, 7, 7], [0, 1, 2, 3, 3, 4, 4, 5, 6, 7, 7, 7, 7], [0, 1, 2, 3, 3, 4, 4, 5, 6, 7, 7], [0, 1, 2, 3, 3, 4, 4, 5, 6, 7]];
+const KBS = {
+  qwerty: [['`1234567890-=', '~!@#$%^&*()_+'], ['qwertyuiop[]\\', 'QWERTYUIOP{}|'], ['asdfghjkl;\'', 'ASDFGHJKL:"'], ['zxcvbnm,./', 'ZXCVBNM<>?']],
+  dvorak: [['`1234567890[]', '~!@#$%^&*(){}'], ['\',.pyfgcrl/=\\', '"<>PYFGCRL?+|'], ['aoeuidhtns-', 'AOEUIDHTNS_'], [';qjkxbmwvz', ':QJKXBMWVZ']],
+};
+// Dvorak is read from which physical key went down, so it works on a keyboard
+// (and a computer) that is set up for QWERTY.
+const CODES = [
+  ['Backquote', 'Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9', 'Digit0', 'Minus', 'Equal'],
+  ['KeyQ', 'KeyW', 'KeyE', 'KeyR', 'KeyT', 'KeyY', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'BracketLeft', 'BracketRight', 'Backslash'],
+  ['KeyA', 'KeyS', 'KeyD', 'KeyF', 'KeyG', 'KeyH', 'KeyJ', 'KeyK', 'KeyL', 'Semicolon', 'Quote'],
+  ['KeyZ', 'KeyX', 'KeyC', 'KeyV', 'KeyB', 'KeyN', 'KeyM', 'Comma', 'Period', 'Slash'],
 ];
+const DV = {};
+CODES.forEach((row, r) => row.forEach((code, i) => { DV[code] = [KBS.dvorak[r][0][i], KBS.dvorak[r][1][i]]; }));
+/** The character a key press types on the player's chosen layout, or null. */
+function charOf(e) {
+  if (P.layout === 'dvorak' && DV[e.code]) return DV[e.code][e.shiftKey ? 1 : 0];
+  return e.key.length === 1 ? e.key : null;
+}
+const FINGERS = ['left pinky', 'left ring finger', 'left middle finger', 'left pointer finger', 'right pointer finger', 'right middle finger', 'right ring finger', 'right pinky'];
+function fingerOf(c) {
+  const rows = KBS[P.layout] || KBS.qwerty;
+  for (let r = 0; r < 4; r++) { const i = rows[r][0].indexOf(c); if (i >= 0) return FINGERS[FING[r][i]]; }
+  return '';
+}
 const KEY_PITCH = 34; // key width plus gap, in px (matches style.css)
 const keyEl = {}; // char -> { el, shift, right }
 let kbShown = null, kbNext = null;
 function buildKb() {
   const kb = $('kb'); kb.innerHTML = '';
-  KB.forEach(([lo, up, fing], r) => {
+  for (const k in keyEl) delete keyEl[k];
+  kbShown = kbNext = null;
+  (KBS[P.layout] || KBS.qwerty).forEach(([lo, up], r) => {
+    const fing = FING[r];
     const row = document.createElement('div'); row.className = 'r';
     // real keyboards stagger the rows: Q sits 1.5 keys in, A 1.75, Z 2.25
     row.style.paddingLeft = [0, 1.5, 1.75, 0][r] * KEY_PITCH + 'px';
     const add = (label, cls) => { const k = document.createElement('div'); k.className = 'k ' + cls; k.textContent = label; row.appendChild(k); return k; };
     if (r === 3) keyEl.shiftL = add('shift', 'wide f0');
     [...lo].forEach((c, i) => {
-      const el = add(c.toUpperCase(), `f${fing[i]}` + ('asdfjkl;'.includes(c) ? ' home' : ''));
+      const el = add(c.toUpperCase(), `f${fing[i]}` + (r === 2 && (i < 4 || (i > 5 && i < 10)) ? ' home' : ''));
       keyEl[c] = { el, shift: false, right: fing[i] >= 4 };
       keyEl[up[i]] = { el, shift: true, right: fing[i] >= 4 };
     });
@@ -149,7 +173,7 @@ function updateKb(next) {
   // The guide is a crutch, so it only appears when it helps: while keys are
   // new, after a slip, or when the player has been stuck on a key for a while.
   const show = P.guide && mode === 'game' && (!!T.p || !!CH.opts)
-    && (P.fresh > 0 || T.miss > 0 || performance.now() - Math.max(T.last, T.shown) > 4000);
+    && (P.fresh > 0 || P.step < 5 || (P.layout === 'dvorak' && P.step < S.STAGES.length) || T.miss > 0 || performance.now() - Math.max(T.last, T.shown) > 4000);
   if (show === kbShown && next === kbNext) return;
   kbShown = show; kbNext = next;
   kb.classList.toggle('hidden', !show);
@@ -336,6 +360,33 @@ function finishRoom() {
 }
 
 // ---------- start screen ----------
+const crewWord = () => { try { return localStorage.getItem('qq.crew') || ''; } catch { return ''; } };
+/** A QWERTY / Dvorak switch. */
+function layoutButtons(el, get, set) {
+  el.innerHTML = '';
+  for (const [id, label] of [['qwerty', 'QWERTY'], ['dvorak', 'Dvorak']]) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.textContent = label; b.className = get() === id ? 'sel' : '';
+    b.onclick = () => { set(id); layoutButtons(el, get, set); };
+    el.appendChild(b);
+  }
+}
+/** New keys (or a new job) unlocked: stop and celebrate. */
+function party(title, keys, note) {
+  $('partyTitle').textContent = title;
+  const box = $('partyKeys'); box.innerHTML = '';
+  for (const k of keys) {
+    const d = document.createElement('div'); d.className = 'cap'; d.textContent = k.toUpperCase();
+    const f = document.createElement('small'); f.textContent = fingerOf(k);
+    const w = document.createElement('div'); w.append(d, f); box.appendChild(w);
+  }
+  $('partyNote').textContent = note;
+  $('party').classList.remove('hidden');
+  $('partyGo').focus();
+  held.clear();
+  confetti(me.x, me.y - 60, 160); sfx.win(); npc('promo');
+  [300, 700, 1100].forEach(ms => setTimeout(() => { confetti(me.x + (Math.random() - 0.5) * 500, me.y - 100 - Math.random() * 200, 60); }, ms));
+}
 function initStart() {
   const row = $('colors');
   COLORS.forEach((c, i) => {
@@ -346,7 +397,11 @@ function initStart() {
   });
   $('name').value = P.name;
   $('name').focus();
+  let layout = P.layout;
+  layoutButtons($('layouts'), () => layout, l => { layout = l; });
   const go = () => {
+    S.switchLayout(P, layout);
+    buildKb();
     P.name = $('name').value.trim().slice(0, 12) || 'builder';
     S.saveProfile(P);
     $('start').classList.add('hidden');
@@ -395,7 +450,7 @@ function endPlacement(step) {
   $('place').classList.add('hidden');
   startGame();
 }
-addEventListener('keydown', e => { if (mode === 'place' && !PL.t0 && e.key.length === 1) PL.t0 = performance.now(); }, true);
+addEventListener('keydown', e => { if (mode === 'place' && !PL.t0 && charOf(e)) PL.t0 = performance.now(); }, true);
 
 // ---------- network glue ----------
 function profileMsg() {
@@ -485,7 +540,7 @@ function handleEvents() {
       ['🙋 Thank you!', '🙆 You saved the day!', '❤️', '❤️'].forEach((t, i) => setTimeout(() => floatText(t, ev.x - 60 + i * 40, ev.y - 30 - (i % 2) * 24, '#d6336c', 18), i * 350));
       const mine = (ev.who || []).includes(net.selfId);
       if (!mine && busy()) continue; // someone else fixed it while this player was busy: say nothing
-      if (mine || (nearMe(ev.x, ev.y) && !inside)) { confetti(ev.x, ev.y - 40, 50); sfx.win(); npc(`job${ev.jt}done`); }
+      if (mine || (nearMe(ev.x, ev.y) && !inside)) { confetti(ev.x, ev.y - 40, 50); sfx.win(); npc(jobClip(ev.jt, ev.v, 'done')); }
       if ((ev.who || []).includes(net.selfId)) { P.thanks++; for (const it of S.newUnlocks(P)) toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'); S.saveProfile(P); }
     }
     else if (ev.t === 'round') setTimeout(() => { const r = S.ROLES[myRole()]; if (!busy()) toast(`New round! Your job: ${r.icon} ${r.name}`); }, 300);
@@ -498,8 +553,8 @@ async function startGame() {
   mode = 'game';
   $('hud').classList.remove('hidden'); $('panel').classList.remove('hidden');
   buildKb();
-  const code = new URLSearchParams(location.hash.slice(1)).get('room') || '';
-  const room = await findRoom(code);
+  const q = new URLSearchParams(location.hash.slice(1)), code = q.get('room') || crewWord();
+  const room = await findRoom(code, q.get('lan'));
   roomId = room.id; roomLabel = room.label;
   const saved = loadWorld(roomId);
   if (saved) Object.assign(st, { d: saved.d, have: saved.have, total: saved.total });
@@ -508,7 +563,7 @@ async function startGame() {
   me.x = D.cx + (Math.random() - 0.5) * 300; me.y = D.cy + 45; cam.x = me.x; cam.y = me.y;
   net = new Net(handlers);
   applyProfile(me, profileMsg());
-  await net.join(roomId);
+  await net.join(roomId, { password: code, lanOnly: room.lan });
   if (!roomId) toast('Could not reach the network. Playing solo for now.');
   setInterval(hostTick, 250);
   setInterval(() => { if (st.total !== savedTotal) { savedTotal = st.total; saveWorld(roomId, st); } S.saveProfile(P); }, 4000);
@@ -614,13 +669,15 @@ const nearMe = (x, y) => Math.hypot(x - me.x, y - me.y) < 900;
 /** In the middle of typing, or visiting a building: not to be interrupted. */
 const busy = () => !!engaged || !!inside;
 const greeted = new Set();
+/** The recorded line for a problem: its own variant's if there is one. */
+const jobClip = (t, v, suf = '') => (v && Voice.has(`n/job${t}${suf}_${v}`) ? `job${t}${suf}_${v}` : `job${t}${suf}`);
 /** Announce a problem or the monster only when a free player walks up to it. */
 function greet() {
   if (busy()) return;
   for (const j of st.jobs || []) {
     if (greeted.has(j.id) || Math.hypot(j.px - me.x, j.py - me.y) > 300) continue;
     greeted.add(j.id);
-    toast('🚨 ' + JOBS[j.t].call); npc('job' + j.t);
+    toast('🚨 ' + (JOBS[j.t].v[j.v | 0] || JOBS[j.t].v[0]).call); npc(jobClip(j.t, j.v));
   }
   const b = st.boss;
   if (!b) greeted.delete('boss');
@@ -651,7 +708,7 @@ function finishPrompt(secs) {
   else if (inside) {
     inside.placed++; inside.pop = 0; P.rooms[inside.id] = inside.placed; inside.talk = 0;
     if (inside.placed >= 6) finishRoom();
-  } else if (job) floatText(['💦 splash!', '🔧 clank!', '🪜 up!', '🚨 stop!'][T.jobType] || '👍', me.x, me.y - 100, '#2f7de1');
+  } else if (job) floatText(JOBS[T.jobType]?.fx || '👍', me.x, me.y - 100, '#2f7de1');
   else if (boss && st.boss) fx.push({ text: '🧱', x: me.x, y: me.y - 60, vx: (st.boss.x - me.x) * 2.5, vy: (st.boss.y - 80 - me.y + 60) * 2.5, life: 0.4, size: 26 });
   else floatText(n === 2 ? '+2 🧱' : '+1 🧱', me.x, me.y - 100, '#c8553d');
   tally(p, ok, T.errs, secs);
@@ -672,7 +729,8 @@ function tally(p, clean, errs, secs) {
     toast(`${'⭐'.repeat(res.stars)} Lesson done: ${Math.round(res.acc * 100)}% accurate` + (res.stars === 3 ? '. Crane earned: 3 double loads!' : ''));
     if (res.promoted) {
       const fresh = P.step < S.STAGES.length ? `New keys: ${S.STAGES[P.step].keys.toUpperCase().split('').join(' and ')}` : `New job: ${S.stepName(P.step)}`;
-      setTimeout(() => { toast(`🎉 Promotion! ${fresh}`, 'gold'); confetti(me.x, me.y - 60, 80); sfx.win(); npc('promo'); }, 900);
+      const keys = P.step < S.STAGES.length ? S.STAGES[P.step].keys.split('') : [];
+      setTimeout(() => party(keys.length ? 'New keys unlocked!' : 'Promotion!', keys, keys.length ? 'The keyboard picture will show you where they are.' : fresh), 900);
     }
     if (res.ready) setTimeout(() => toast('That is plenty of new keys for one day. More unlock tomorrow: sleep makes fingers smarter!'), 900);
     if (res.demoted) setTimeout(() => toast('Let\'s spend a little more time on the last keys.'), 900);
@@ -824,6 +882,7 @@ function debugInfo() {
       const o = others.get(id);
       return { id: short(id), name: o?.name, seen: !!o?.seen, posAgeMs: o?.at ? Math.round(now - o.at) : null };
     }),
+    sameNetworkOnly: net?.lanOnly, shutOut: net?.badPeers.size, stillChecking: net?.checking.size,
     hostHeardAgeMs: net?.heard ? Math.round(now - net.heard) : null,
     city: { d: st.d, have: st.have, total: st.total, boss: !!st.boss, jobs: (st.jobs || []).map(j => `${JOBS[j.t].name}:${j.hp}`), roles: Object.values(st.roles || {}) },
     player: { step: P.step, lessonsToday: P.day.lessons, credits: P.credits },
@@ -956,12 +1015,13 @@ function frame(now) {
 addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
   if (mode === 'start' || (mode === 'game' && document.querySelector('.screen:not(.hidden)'))) return;
-  if (mode === 'place') { if (e.key.length === 1) { e.preventDefault(); typeChar(e.key); } return; }
+  const ch = charOf(e);
+  if (mode === 'place') { if (ch) { e.preventDefault(); typeChar(ch); } return; }
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }
   if (e.key === 'Escape') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }
   if (e.key === 'Enter') { pressEnter(); e.preventDefault(); return; }
   if (e.key === 'Tab' || e.key === 'Backspace') { e.preventDefault(); return; }
-  if (e.key.length === 1) { e.preventDefault(); CH.opts ? typeChoice(e.key) : typeChar(e.key); }
+  if (ch) { e.preventDefault(); CH.opts ? typeChoice(ch) : typeChar(ch); }
 });
 addEventListener('keyup', e => held.delete(e.key));
 addEventListener('blur', () => held.clear());
@@ -995,14 +1055,25 @@ function openAdult() {
     sel.appendChild(o);
   }
   sel.value = P.step; $('aPacing').checked = P.pacing; $('aGuide').checked = P.guide;
-  $('aRoom').value = new URLSearchParams(location.hash.slice(1)).get('room') || '';
+  $('aRoom').value = new URLSearchParams(location.hash.slice(1)).get('room') || crewWord();
   const weak = S.weakKeys(P, 6).map(k => (k === ' ' ? 'space' : k.toUpperCase())).join(' ');
   $('aStats').textContent = `Loads delivered: ${P.loads} · three-star lessons: ${P.stars3} · best clean streak: ${P.bestStreak} · days played: ${P.days} · ` +
-    `progress to next step: ${P.credits}/${S.CREDITS_TO_ADVANCE}` + (weak ? ` · keys to work on: ${weak}` : '');
+    `progress to next step: ${P.credits}/${S.creditsNeeded(P)}` + (weak ? ` · keys to work on: ${weak}` : '');
   $('adult').classList.remove('hidden');
 }
 $('btnWear').onclick = openWardrobe;
 $('btnAdult').onclick = openAdult;
+$('btnKeys').onclick = () => {
+  let layout = P.layout;
+  layoutButtons($('kLayouts'), () => layout, l => { layout = l; });
+  $('kGo').onclick = () => {
+    if (layout !== P.layout) { S.switchLayout(P, layout); S.saveProfile(P); location.reload(); }
+    else $('keys').classList.add('hidden');
+  };
+  $('kRetest').onclick = () => { S.switchLayout(P, layout); P.placed = false; S.saveProfile(P); location.reload(); };
+  $('keys').classList.remove('hidden');
+};
+$('partyGo').onclick = () => { $('party').classList.add('hidden'); $('partyGo').blur(); };
 $('vol').value = P.vol;
 $('vol').oninput = e => { P.vol = +e.target.value; P.sound = P.vol > 0; S.saveProfile(P); };
 $('vol').onchange = e => { sfx.load(); e.target.blur(); };
@@ -1014,11 +1085,11 @@ $('aDebug').onclick = () => {
   const out = $('aDebugOut'); out.value = debugInfo(); out.classList.remove('hidden'); out.select();
   navigator.clipboard?.writeText(out.value).then(() => toast('Debug info copied.'), () => {});
 };
-$('aJoin').onclick = () => { const c = $('aRoom').value.trim(); location.hash = c ? 'room=' + encodeURIComponent(c) : ''; location.reload(); };
+$('aJoin').onclick = () => { try { localStorage.setItem('qq.crew', $('aRoom').value.trim()); } catch { /* ignore */ } location.hash = ''; location.reload(); };
 $('aRetest').onclick = () => { P.placed = false; S.saveProfile(P); location.reload(); };
 $('aReset').onclick = () => { if (confirm('Erase this player\'s progress on this device?')) { S.resetProfile(); location.reload(); } };
 document.querySelectorAll('.screen .close').forEach(b => { b.onclick = () => { b.closest('.screen').classList.add('hidden'); b.blur(); }; });
 document.querySelectorAll('#hud button').forEach(b => b.addEventListener('click', () => b.blur()));
 
 initStart();
-window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; } }; // for debugging in the console
+window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, district, party }; // for debugging in the console

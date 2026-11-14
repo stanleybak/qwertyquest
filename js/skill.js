@@ -2,13 +2,31 @@
 // Everything here is local to one player and saved in localStorage.
 import DATA from './content-data.js';
 
-export const STAGES = DATA.stages;
-const NS = STAGES.length;            // key stages (steps 0..NS-1)
+// The key stages and their word lists depend on the keyboard layout.
+export let STAGES = DATA.stages;
+let LD = DATA;
+const NS = DATA.stages.length;       // key stages (steps 0..NS-1), the same count on every layout
+export function setLayout(name) {
+  LD = name === 'dvorak' ? DATA.dvorak : DATA;
+  STAGES = LD.stages;
+  cumKeysCache.length = wordsCache.length = lowCache.length = 0;
+}
+/** Change keyboard layout. Each layout keeps its own level and key history. */
+export function switchLayout(p, name) {
+  if (p.layout === name) return;
+  const mine = { step: p.step, placed: p.placed, credits: p.credits, badRun: p.badRun, keys: p.keys, fresh: p.fresh, lesson: p.lesson };
+  Object.assign(p, p.other || { step: 0, placed: false, credits: 0, badRun: 0, keys: {}, fresh: 12, lesson: { n: 0, hit: 0, miss: 0 } });
+  p.other = mine; p.layout = name;
+  setLayout(name);
+}
 export const MAX_STEP = NS + 3;      // then: capitals, sentences, fluency, mastery
 export const LESSON_LEN = 12;        // prompts per lesson
 export const SHIFT_LESSONS = 9;      // lessons in one daily shift (about 20 minutes)
 export const MAX_PROMOS = 3;         // new steps a player can unlock in one day
 export const CREDITS_TO_ADVANCE = 3; // lessons at 95%+ needed to unlock the next step
+// The first five steps (the home row) are gentler: two lessons at 90%+, and up to five new steps a day.
+const early = p => p.step < 5;
+export const creditsNeeded = p => (early(p) ? 2 : CREDITS_TO_ADVANCE);
 
 export const ROLES = [
   { id: 0, name: 'Hauler', icon: '🧱', tip: 'short and quick' },
@@ -32,12 +50,12 @@ const lowCache = [];
 /** Real phrases typeable with the keys learned by `step`. */
 function phrasesUpTo(step) {
   const s = Math.min(step, NS - 1);
-  if (!lowCache[s]) lowCache[s] = DATA.low.slice(0, s + 1).flat();
+  if (!lowCache[s]) lowCache[s] = LD.low.slice(0, s + 1).flat();
   return lowCache[s];
 }
 function wordsUpTo(step) {
   const s = Math.min(step, NS - 1);
-  if (!wordsCache[s]) wordsCache[s] = DATA.words.slice(0, s + 1).flat();
+  if (!wordsCache[s]) wordsCache[s] = LD.words.slice(0, s + 1).flat();
   return wordsCache[s];
 }
 
@@ -91,7 +109,9 @@ export function loadProfile() {
     stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, rooms: {}, tips: {}, fresh: 12, shields: 0, crane: 0,
     wear: { hat: 'h0', tool: 't0', pet: 'p0', ride: 'r0' }, seen: ['h0', 't0', 'p0', 'r0'],
     day: { date: '', lessons: 0, promos: 0 }, pacing: true, guide: true, sound: true, vol: 0.7,
+    layout: 'qwerty', other: null,
   }, p || {});
+  setLayout(p.layout);
   rollDay(p);
   return p;
 }
@@ -257,7 +277,7 @@ export function genPrompt(p, role = 0, boss = false) {
   if (step < NS) {
     const ws = wordsUpTo(step);
     // half the time, insist on a word that uses one of the newest keys
-    const useFresh = !boss && Math.random() < 0.5 && DATA.words[step].length >= 6;
+    const useFresh = !boss && Math.random() < 0.5 && LD.words[step].length >= 6;
     const o = boss ? { tries: 40 } : { boost: fresh, tries: useFresh ? 16 : 8 };
     if (useFresh) o.filter = w => [...fresh].some(c => w.includes(c));
     if (role === 2 && !boss) {
@@ -273,7 +293,7 @@ export function genPrompt(p, role = 0, boss = false) {
     // builders get real phrases and sentences whenever the keys allow it
     const ph = phrasesUpTo(step);
     if (ph.length >= 10 && Math.random() < 0.8) {
-      const t = pickWeak(p, ph, { boost: fresh, tries: 12, filter: useFresh && DATA.low[step].length >= 6 ? o.filter : null });
+      const t = pickWeak(p, ph, { boost: fresh, tries: 12, filter: useFresh && LD.low[step].length >= 6 ? o.filter : null });
       return { text: t, say: t };
     }
     const a = pickWeak(p, ws, o), b = pickWeak(p, ws, o);
@@ -331,20 +351,21 @@ export function lessonPrompt(p) {
   const acc = hit / Math.max(1, hit + miss);
   p.lesson = { n: 0, hit: 0, miss: 0 };
   const stars = acc >= 0.95 ? 3 : acc >= 0.9 ? 2 : 1;
+  const good = stars === 3 || (early(p) && stars === 2);
   const counts = !p.pacing || p.day.lessons < SHIFT_LESSONS; // lessons past the shift are just for fun
   p.day.lessons++;
   const res = { acc, stars, promoted: false, demoted: false, ready: false, shiftDone: p.day.lessons === SHIFT_LESSONS };
   if (stars === 3) { p.stars3++; p.crane += 3; }
   if (miss === 0) p.perfect++;
   if (counts) {
-    if (stars === 3) { p.credits++; p.badRun = 0; }
+    if (good) { p.credits++; p.badRun = 0; }
     else if (acc < 0.8) {
       p.credits = Math.max(0, p.credits - 1);
       if (++p.badRun >= 2 && p.step > 0) { p.step--; p.credits = 0; p.badRun = 0; p.fresh = 12; res.demoted = true; }
     } else p.badRun = 0;
   }
-  if (p.credits >= CREDITS_TO_ADVANCE && p.step < MAX_STEP) {
-    if (p.pacing && (p.day.promos | 0) >= MAX_PROMOS) { res.ready = !p.day.told; p.day.told = true; } // enough new things for one day
+  if (p.credits >= creditsNeeded(p) && p.step < MAX_STEP) {
+    if (p.pacing && (p.day.promos | 0) >= (early(p) ? 5 : MAX_PROMOS)) { res.ready = !p.day.told; p.day.told = true; } // enough new things for one day
     else { p.step++; p.credits = 0; p.fresh = 12; p.day.promos = (p.day.promos | 0) + 1; res.promoted = true; }
   }
   return res;
@@ -354,7 +375,7 @@ export function lessonPrompt(p) {
 // Probes climb the ladder. Passing a probe places the player past it.
 // The first probes are gentle: one key at a time, then short home-row drills.
 export const PROBES = [
-  { step: 0, n: 5, cps: 0.25, place: 0, single: 'asdfjkl' },
+  { step: 0, n: 5, cps: 0.25, place: 0, single: true },
   { step: 2, n: 3, cps: 0.4, place: 3, drill: true },
   { step: 4, n: 3, cps: 0.5, place: 5, drill: true },
   { step: 4, n: 3, cps: 0.6, place: 5, word: true },
@@ -366,7 +387,7 @@ export const PROBES = [
 ];
 export function probePrompt(p, probe) {
   const fake = { ...p, step: probe.step, keys: p.keys };
-  if (probe.single) return { text: pick(probe.single.split('')), spaced: true };
+  if (probe.single) return { text: pick(cumKeys(3).replace(/[^a-z]/g, '').split('')), spaced: true };
   if (probe.drill) return { text: letters(fake, 3, false), spaced: true };
   if (probe.word) return { text: pick(wordsUpTo(probe.step).filter(w => w.length >= 3)) };
   return genPrompt(fake, probe.step < 5 ? 0 : 1, false);

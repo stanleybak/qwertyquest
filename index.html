@@ -27,6 +27,7 @@
     <button id="btnWear" title="Wardrobe">🎒</button>
     <button id="btnSound" title="Sound">🔊</button>
     <input id="vol" type="range" min="0" max="1" step="0.05" title="Volume" aria-label="Volume">
+    <button id="btnKeys" title="Keyboard layout and warm-up">⌨️</button>
     <button id="btnAdult" title="Grown-ups">⚙️</button>
   </div>
 </div>
@@ -48,8 +49,10 @@
     <label for="name">Type your builder's name</label>
     <input id="name" maxlength="12" autocomplete="off" spellcheck="false" placeholder="name">
     <div id="colors"></div>
+    <label>Keyboard layout</label>
+    <div id="layouts" class="seg"></div>
     <button id="go" class="primary">Start building ▶</button>
-    <p id="netnote" class="small">Everyone on the same Wi-Fi lands in the same city automatically.</p>
+    <p id="netnote" class="small">Everyone on the same Wi-Fi lands in the same city automatically. Only devices on your own network can join.</p>
     <p class="small">You need a real keyboard to play.</p>
   </div>
 </div>
@@ -74,13 +77,34 @@
   </div>
 </div>
 
+<div id="keys" class="screen hidden">
+  <div class="card">
+    <h2>⌨️ Keyboard</h2>
+    <label>Layout</label>
+    <div id="kLayouts" class="seg"></div>
+    <p class="small">Dvorak works on any keyboard: the game reads which key you press, not the letter printed on it. Follow the keyboard picture on screen. Each layout keeps its own level.</p>
+    <div class="rowbtn"><button id="kRetest">Redo the warm-up to find my level again</button></div>
+    <button id="kGo" class="primary">Done</button>
+  </div>
+</div>
+
+<div id="party" class="screen hidden">
+  <div class="card">
+    <div class="stars">⭐⭐⭐</div>
+    <h2 id="partyTitle"></h2>
+    <div id="partyKeys"></div>
+    <p id="partyNote" class="sub"></p>
+    <button id="partyGo" class="primary">Keep going ▶</button>
+  </div>
+</div>
+
 <div id="adult" class="screen hidden">
   <div class="card wide">
     <h2>⚙️ Grown-ups</h2>
     <label>Level <select id="aStep"></select></label>
     <label class="row"><input type="checkbox" id="aPacing"> Daily pacing: up to three new steps and one counted shift per day</label>
     <label class="row"><input type="checkbox" id="aGuide"> Show the keyboard guide when keys are new, after a slip, or when stuck</label>
-    <label>Private room code (leave empty to use this network's city)
+    <label>Private room code, for playing with someone on another network (leave empty for the same-Wi-Fi city, which only devices on your network can join)
       <input id="aRoom" maxlength="24" autocomplete="off" spellcheck="false" placeholder="e.g. grandma"></label>
     <div id="aStats" class="small"></div>
     <div class="rowbtn">

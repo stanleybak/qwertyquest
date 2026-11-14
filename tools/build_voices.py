@@ -46,6 +46,15 @@ CAST = {
     "scientist": ("echo", "An excitable, eccentric scientist. Quick and enthusiastic."),
     "guide": ("fable", "A grand, proud museum guide. Theatrical."),
     "captain": ("ash", "A cheerful old ferry captain with a salty sailor's voice."),
+    "mechanic": ("ballad", "A cheerful, hands-on car mechanic."),
+    "driver": ("verse", "A friendly school bus driver."),
+    "mayor": ("fable", "A jolly, important-sounding town mayor."),
+    "mail": ("alloy", "A cheerful mail carrier."),
+    "ranger": ("ballad", "A calm, kind forest ranger."),
+    "lifeguard": ("nova", "An energetic young lifeguard."),
+    "skier": ("shimmer", "A cheerful grown-up bundled up against the cold."),
+    "farmer": ("onyx", "A warm, folksy farmer with a slow country voice."),
+    "teacher": ("sage", "A kind school teacher."),
 }
 
 # (clip id, character, text, extra direction for this line)
@@ -60,14 +69,6 @@ LINES = [
     ("promo", "fern", "You earned a promotion! Here come some new keys.", "Excited."),
     ("combo", "fern", "Team combo! Bonus bricks for everybody!", "Cheering."),
     ("river", "fern", "No bridge here yet, so hop in a boat!", "Playful."),
-    ("job0", "chief", "Fire! Fire! Come inside, grab a hose and help me put it out!", "Urgent and a little panicked, speaking fast."),
-    ("job0done", "chief", "Phew. The fire is out. Thank you, builder!", "Relieved, catching his breath, slow."),
-    ("job1", "plumber", "Oh no, the pipes burst! There's water everywhere! Come in and help me fix these leaks!", "Alarmed and hurried."),
-    ("job1done", "plumber", "All dry. Nice work, partner!", "Relieved and cheerful."),
-    ("job2", "kid", "My kitten is stuck up the tree! Can you help? Please?", "Worried, close to tears."),
-    ("job2done", "kid", "You saved my kitten! Thank you so much!", "Overjoyed."),
-    ("job3", "officer", "Stop, thief! Somebody is running off with our bricks. Catch them!", "Shouting, urgent."),
-    ("job3done", "officer", "Got them. The bricks are safe. Good work, deputy!", "Satisfied and warm."),
     ("job3gone", "thief", "Hee hee hee! Too slow! See you next time!", "Gleeful, running away."),
     ("boss", "monster", "Rawr! I am the Typo Monster! I love spelling mistakes. Yum yum yum!", "Loud and silly."),
     ("bosswin", "monster", "Ow! Okay, okay! Too many good spellers. I'm leaving!", "Whiny, defeated, comic."),
@@ -90,7 +91,7 @@ LINES = [
     ("m_captain_done", "captain", "Shipshape! You made it aboard. Thank ye kindly!", ""),
 ]
 
-KEY_NAMES = {";": "semicolon", ",": "comma", ".": "period", "/": "slash", " ": "space"}
+KEY_NAMES = {";": "semicolon", ",": "comma", ".": "period", "/": "slash", " ": "space", "'": "apostrophe"}
 
 
 def jobs(with_words):
@@ -99,6 +100,15 @@ def jobs(with_words):
     for cid, who, text, extra in LINES:
         voice, style = CAST[who]
         out.append((f"n/{cid}.mp3", voice, (style + " " + extra).strip(), text))
+    # city problems: one call per variant, one thank-you (or one per variant)
+    src = (ROOT / "js" / "jobs.js").read_text(encoding="utf-8")
+    for t, job in enumerate(json.loads(src[src.index("["):src.rindex("]") + 1])):
+        voice, style = CAST[job["who"]]
+        out.append((f"n/job{t}done.mp3", voice, (style + " " + job["tdir"]).strip(), job["thanks"]))
+        for v, var in enumerate(job["v"]):
+            out.append((f"n/job{t}{'_%d' % v if v else ''}.mp3", voice, (style + " " + var["dir"]).strip(), var["say"]))
+            if "thanks" in var:
+                out.append((f"n/job{t}done_{v}.mp3", voice, (style + " " + job["tdir"]).strip(), var["thanks"]))
     voice, style = CAST["letter"]
     for c in "abcdefghijklmnopqrstuvwxyz":
         out.append((f"l/{c}.mp3", voice, style, f"{c.upper()}."))

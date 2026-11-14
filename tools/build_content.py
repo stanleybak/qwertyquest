@@ -38,6 +38,25 @@ STAGES = [
     ("z/", "Bottom row: Z and slash"),
 ]
 
+# The same idea on a Dvorak keyboard: the same finger order, different letters.
+DVORAK = [
+    ("uh", "Index fingers"),
+    ("et", "Middle fingers"),
+    ("on", "Ring fingers"),
+    ("as", "Pinkies"),
+    ("id", "Index reach"),
+    ("cr", "Top row: C and R"),
+    ("pg", "Top row: P and G"),
+    ("yf", "Top row: Y and F"),
+    ("l.", "Top row: L and period"),
+    ("bm", "Bottom row: B and M"),
+    ("kw", "Bottom row: K and W"),
+    ("jv", "Bottom row: J and V"),
+    ("x,", "X and comma"),
+    ("qz", "Bottom row: Q and Z"),
+    (";'", "Semicolon and apostrophe"),
+]
+
 WORDS = """
 a as ask asks add adds ad dad dads sad lad lads fad all fall falls hall halls
 gal gag gas gash has had hash half jag lag lags sag flag flags glad glass lass
@@ -168,6 +187,16 @@ exactly six boxes.|fix it, mix it, box it.|the ox is next to the box.|a text is 
 the zebra is in the zoo.|a lazy, fuzzy puzzle.|pizza is the prize.|zip it up.|a dizzy bee buzzes.
 the wizard zaps the maze.|yes/no|and/or|a frozen breeze.|zero pizza is a crazy prize.|buzz, zip, zap.
 the lazy zebra dozes.|a dozen cozy zoo animals.|his/her|zoom to the zoo.|the quiz is a breeze.
+"""
+# Extra phrases from the Dvorak home row, so Dvorak learners get real language early too.
+LOW += """the hut|not the nut|ten to ten|hunt the hen|then the hut|tote the ton|the tune|the hen|ten tons|the tent
+the hens ate oats|she ate a nut|he has ten nuts|a neat hat|the sun shone|oh no|eat the oats|not at the hut
+set the net|soon the sun set|a nest on the hut|he has ten tents|she has a ton|note the notes|the tot has a hat
+the sun is hot|she ate toast|he sat on a seat|the tide is in|no shade at noon|the dunes had sand|ten hens in a nest
+he hid the note|she sees the sunset|it is not so sad|the ant sat on a seed|toss the nuts to the hen|the nest had ten ants
+sit in the shade|shoes and hats|his aunt had tea|the east side|dad dusted the house|the hound heads south
+noon in the sun|need a hand|this is the nest|that is his seat|she said no|he said so|tea and toast|she is so neat
+that is not it|sound the tune|the oasis is south|nine hens and a hound|used a stone|a thin tin tune|does the sun shine
 """
 LOW = [x.strip() for x in LOW.replace("\n", "|").split("|") if x.strip()]
 
@@ -336,6 +365,38 @@ EXTRA_OK = {"qwerty", "qwertyquest", "fahrenheit", "celsius", "p.m", "a.m", "was
             "cow's", "fizz", "pip", "arachnids", "octopuses", "shh"}
 
 
+def sort_into(stages, words, label):
+    """Put each word and phrase in the earliest stage whose cumulative keys can type it."""
+    have, cum = set(), []
+    for keys, _ in stages:
+        have |= set(keys)
+        cum.append(set(have))
+    by_stage = [[] for _ in stages]
+    for w in words:
+        for i, ks in enumerate(cum):
+            if set(w) <= ks:
+                by_stage[i].append(w)
+                break
+        else:
+            sys.exit(f"word {w} uses keys outside all {label} stages")
+    # self-check: each word really only uses that stage's keys
+    for i, ws in enumerate(by_stage):
+        for w in ws:
+            assert set(w) <= cum[i], (w, i)
+            assert i == 0 or not set(w) <= cum[i - 1], (w, i)
+    # phrases: same sorting, with the space bar always available. A phrase
+    # that needs a key the layout never teaches (a slash on Dvorak) is left out.
+    low_by_stage = [[] for _ in stages]
+    for text in sorted(set(LOW)):
+        for i, ks in enumerate(cum):
+            if set(text) <= ks | {" "}:
+                low_by_stage[i].append(text)
+                break
+    print(label, "words per stage:", [len(x) for x in by_stage], "total", len(words))
+    print(label, "phrases per stage:", [len(x) for x in low_by_stage])
+    return by_stage, low_by_stage
+
+
 def load_dict():
     for p in DICT_PATHS:
         if Path(p).exists():
@@ -370,48 +431,21 @@ def main():
     if bad:
         sys.exit("NOT IN DICTIONARY:\n  " + "\n  ".join(bad))
 
-    # earliest stage whose cumulative keys spell the word
-    by_stage = [[] for _ in STAGES]
-    have = set()
-    cum = []
-    for keys, _ in STAGES:
-        have |= set(keys)
-        cum.append(set(have))
-    for w in words:
-        for i, ks in enumerate(cum):
-            if set(w) <= ks:
-                by_stage[i].append(w)
-                break
-        else:
-            sys.exit(f"word {w} uses keys outside all stages")
-
-    # self-check: each word really only uses that stage's keys
-    for i, ws in enumerate(by_stage):
-        for w in ws:
-            assert set(w) <= cum[i], (w, i)
-            assert i == 0 or not set(w) <= cum[i - 1], (w, i)
-
-    # phrases: same sorting, with the space bar always available
-    low_by_stage = [[] for _ in STAGES]
-    for text in sorted(set(LOW)):
-        for i, ks in enumerate(cum):
-            if set(text) <= ks | {" "}:
-                low_by_stage[i].append(text)
-                break
-        else:
-            sys.exit(f"phrase {text!r} uses keys outside all stages")
-    print("phrases per stage:", [len(x) for x in low_by_stage], "total", len(set(LOW)))
+    by_stage, low_by_stage = sort_into(STAGES, words, "qwerty")
+    dv_words, dv_low = sort_into(DVORAK, words, "dvorak")
+    assert len(DVORAK) == len(STAGES)
 
     data = {
         "stages": [{"keys": k, "name": n} for k, n in STAGES],
-        "words": by_stage, "low": low_by_stage, "names": NAMES, "places": PLACES, "days": DAYS,
+        "words": by_stage, "low": low_by_stage,
+        "dvorak": {"stages": [{"keys": k, "name": n} for k, n in DVORAK], "words": dv_words, "low": dv_low},
+        "names": NAMES, "places": PLACES, "days": DAYS,
         "phrases": PHRASES, "facts": FACTS, "passages": PASSAGES, "code": CODE,
     }
     out = ROOT / "js" / "content-data.js"
     out.write_text("// GENERATED by tools/build_content.py. Do not edit by hand.\n"
                    "export default " + json.dumps(data, indent=1) + ";\n",
                    encoding="utf-8")
-    print("words per stage:", [len(x) for x in by_stage], "total", len(words))
     print("wrote", out)
 
 

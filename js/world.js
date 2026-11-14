@@ -1,3 +1,6 @@
+import JOBS from './jobs.js';
+export { JOBS }; // city problems that pop up and need typing to fix
+
 // The shared city. The host runs these rules; everyone else just renders the
 // state the host broadcasts.
 //
@@ -8,10 +11,26 @@
 
 export const CELL_W = 820, CELL_H = 620;
 export const ZONE_R = 80;
-const NAMES = ['Homerow Heights', 'Qwerty Quay', 'Shift Street', 'Comma Corner', 'Spacebar Square',
-  'Backspace Bay', 'Tab Terrace', 'Capslock Cove', 'Enter End', 'Escape Estates', 'Semicolon Springs',
-  'Asterisk Alley', 'Hyphen Hill', 'Period Park', 'Bracket Bridge', 'Ampersand Acres'];
-export const districtName = i => NAMES[i % NAMES.length] + (i >= NAMES.length ? ` ${Math.floor(i / NAMES.length) + 1}` : '');
+// Neighborhoods come in six kinds, in turn. Each has its own look and its own problems.
+export const ENVS = ['town', 'farm', 'forest', 'city', 'beach', 'snow'];
+export const envOf = i => ENVS[i % ENVS.length];
+const NAMES = {
+  town: ['Homerow Heights', 'Shift Street', 'Comma Corner', 'Spacebar Square', 'Period Park'],
+  farm: ['Qwerty Acres', 'Ampersand Farm', 'Hyphen Hill Farm', 'Tab Meadow', 'Asterisk Orchard'],
+  forest: ['Backspace Woods', 'Capslock Forest', 'Bracket Grove', 'Semicolon Pines', 'Escape Hollow'],
+  city: ['Enter City', 'Uppercase Uptown', 'Delete Downtown', 'Control Plaza', 'Function Square'],
+  beach: ['Backspace Bay', 'Capslock Cove', 'Tab Tide Beach', 'Slash Sands', 'Home Key Harbor'],
+  snow: ['Shiver Shift', 'Icicle Insert', 'Frosty Function', 'Numlock North', 'Snowy Spacebar'],
+};
+export const districtName = i => {
+  const round = Math.floor(i / ENVS.length), list = NAMES[envOf(i)];
+  return list[round % list.length] + (round >= list.length ? ` ${Math.floor(round / list.length) + 1}` : '');
+};
+const DECOR = {
+  town: ['🌳', '🌷', '⛲', '🌳', '🚲', '🌼'], farm: ['🌾', '🌻', '🐄', '🌽', '🐓', '🌾'], forest: ['🌲', '🌲', '🍄', '🦌', '🌳', '🌲'],
+  city: ['🚏', '🌳', '🛴', '🗽', '🚏', '🌳'], beach: ['🌴', '⛱️', '🐚', '🌴', '🦀', '🏄'], snow: ['🌲', '⛄', '🧊', '🌲', '🦌', '🌲'],
+};
+const HUES = { farm: [0, 28], forest: [18, 28], snow: [185, 50] }; // barns, cabins, icy blues
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -63,19 +82,12 @@ export function walkable(x, y, d) {
   return i !== undefined && i <= d;
 }
 
-// City problems that pop up and need typing to fix.
-export const JOBS = [
-  { name: 'fire', icon: '🔥', tool: '🧯', call: 'Fire in a building! Go inside and help put it out.', done: 'put out the fire', hint: 'Spray the fire!' },
-  { name: 'leak', icon: '💦', tool: '🔧', call: 'A pipe burst in a building! Go inside and fix the leaks.', done: 'fixed the leak', hint: 'Tighten the pipe!' },
-  { name: 'cat', icon: '🐱', tool: '🪜', call: 'A kitten is stuck up a tree!', done: 'rescued the kitten', hint: 'Climb the ladder!' },
-  { name: 'thief', icon: '🦹', tool: '🚨', call: 'A brick thief is on the loose! Catch up and stop them.', done: 'caught the brick thief', hint: 'Stop, thief!' },
-];
 /** The six building sites of district i. Same answer on every peer. */
 export function district(i) {
   if (cache.has(i)) return cache.get(i);
   const r = mulberry(i * 7919 + 17);
   const c = spiral(i);
-  const cx = c.x * CELL_W, cy = c.y * CELL_H;
+  const cx = c.x * CELL_W, cy = c.y * CELL_H, env = envOf(i);
   const sites = [];
   for (let k = 0; k < 6; k++) {
     let kind = r() < 0.45 ? 0 : r() < 0.6 ? 1 : 2;
@@ -84,10 +96,13 @@ export function district(i) {
     sites.push({
       x: cx + (k % 3 - 1) * 250 + (r() - 0.5) * 30, y: cy + (k < 3 ? -110 : 190),
       kind, floors: K.floors, w: K.w, need: K.need + Math.min(6, Math.floor(i / 2)),
-      hue: Math.floor(r() * 360), roof: Math.floor(r() * 3),
+      hue: Math.floor(HUES[env] ? HUES[env][0] + r() * HUES[env][1] : r() * 360), roof: Math.floor(r() * 3), env,
     });
   }
-  const d = { i, cx, cy, sites, name: districtName(i), river: hasRiver(i) };
+  // things standing around between the buildings
+  const spots = [[-385, -215], [385, -215], [-385, 255], [385, 255], [-125, -125], [125, -125], [-125, 180], [125, 180]];
+  const decor = spots.map(([dx, dy]) => ({ x: cx + dx + (r() - 0.5) * 24, y: cy + dy + (r() - 0.5) * 16, e: DECOR[env][Math.floor(r() * DECOR[env].length)] }));
+  const d = { i, cx, cy, sites, decor, env, name: districtName(i), river: hasRiver(i) };
   cache.set(i, d);
   cellIdx.set(`${c.x},${c.y}`, i);
   return d;
@@ -98,7 +113,7 @@ export function newState() {
     d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, combo: 0,
     boss: null, bossIn: 420, round: 0, roundLeft: 300,
     roles: {}, order: [], items: [], itemId: 1, ev: [], evId: 0,
-    jobs: [], jobId: 1, jobIn: 100,
+    jobs: [], jobId: 1, jobIn: 150,
   };
 }
 const saveKey = room => 'qq.world.' + (room || 'solo');
@@ -115,31 +130,28 @@ export function saveWorld(room, st) {
 
 /** Host-side rules. `st` is the live state object; mutate it in place. */
 export class Host {
-  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 90; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
+  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 90; this.recent = []; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
 
-  /** Start a city problem: at a finished building if there is one, else out in the open. */
+  /** Start a city problem that suits this neighborhood and has not come up lately. */
   spawnJob() {
     const st = this.st, D = district(st.d);
-    const built = [];
-    for (let i = st.d; i <= st.d; i++) { // only where the crew is working, never across the map
-      district(i).sites.forEach((s, k) => { if (i < st.d || st.have[k] >= s.need) built.push({ ...s, k, d: i }); });
-    }
-    const taken = t => st.jobs.some(j => j.t === t);
-    let types = [2, 3];
-    if (built.length) types = [0, 0, 1, 2, 3];
-    types = types.filter(t => !taken(t));
-    if (!types.length) return;
-    const t = types[Math.floor(Math.random() * types.length)];
+    const built = D.sites.map((s, k) => ({ ...s, k })).filter(s => st.have[s.k] >= s.need);
+    const pool = JOBS.map((_, t) => t).filter(t => JOBS[t].env.includes(D.env) && (JOBS[t].kind !== 'in' || built.length));
+    let fresh = pool.filter(t => !this.recent.includes(t));
+    if (!fresh.length) fresh = pool.filter(t => t !== this.recent[this.recent.length - 1]);
+    if (!fresh.length) return;
+    const t = fresh[Math.floor(Math.random() * fresh.length)], J = JOBS[t];
+    this.recent.push(t); if (this.recent.length > 7) this.recent.shift(); // nothing repeats until seven others have had a turn
     const hp = (t === 0 ? 4 : 3) + this.players();
-    const j = { id: st.jobId++, t, hp, max: hp, left: 300, who: [] };
-    if (t < 2) {
+    const j = { id: st.jobId++, t, v: Math.floor(Math.random() * J.v.length), hp, max: hp, left: 300, who: [] };
+    if (J.kind === 'in') {
       const s = built[Math.floor(Math.random() * built.length)];
-      Object.assign(j, { d: s.d, site: s.k, x: Math.round(s.x), y: Math.round(s.y), h: s.floors * 28, px: Math.round(s.x), py: Math.round(s.y + 48) });
+      Object.assign(j, { d: st.d, site: s.k, x: Math.round(s.x), y: Math.round(s.y), h: s.floors * 28, px: Math.round(s.x), py: Math.round(s.y + 48) });
     } else {
       const side = Math.random() < 0.5 ? -1 : 1;
-      j.x = D.cx + side * (300 + Math.random() * 60); j.y = D.cy + (D.river ? -20 : 120);
-      j.px = j.x; j.py = j.y + (t === 2 ? 26 : 0);
-      if (t === 3) { j.tx = j.x; j.ty = j.y; j.stun = 0; }
+      j.x = Math.round(D.cx + side * (300 + Math.random() * 50)); j.y = D.cy + (D.river ? -20 : 120);
+      j.px = j.x; j.py = j.y + (J.bg ? 26 : 0);
+      if (J.kind === 'run') { j.tx = j.x; j.ty = j.y; j.stun = 0; }
     }
     st.jobs.push(j);
     this.event('job', { jt: t, x: Math.round(j.px), y: Math.round(j.py) });
@@ -199,11 +211,11 @@ export class Host {
       if (i < 0) return;
       const j = st.jobs[i];
       j.hp--; if (!j.who.includes(from)) j.who.push(from);
-      if (j.t === 3) j.stun = 5;
+      if (JOBS[j.t].kind === 'run') j.stun = 5;
       if (j.hp <= 0) {
         st.jobs.splice(i, 1);
-        this.event('jobDone', { jt: j.t, x: j.px, y: j.py, who: j.who });
-        st.jobIn = Math.max(st.jobIn, 120); st.bossIn = Math.max(st.bossIn, 120);
+        this.event('jobDone', { jt: j.t, v: j.v, x: j.px, y: j.py, who: j.who });
+        st.jobIn = Math.max(st.jobIn, 200); st.bossIn = Math.max(st.bossIn, 120);
         st.combo += 0.15;
         this.sprinkle(1); // grateful neighbors chip in bricks
       }
@@ -250,7 +262,7 @@ export class Host {
     }
     for (let i = st.jobs.length - 1; i >= 0; i--) {
       const j = st.jobs[i];
-      if (j.t === 3) { // the thief scurries between spots, and freezes when caught up with
+      if (JOBS[j.t].kind === 'run') { // runaways scurry between spots, and freeze when caught up with
         if (j.stun > 0) j.stun -= dt;
         else {
           const dx = j.tx - j.x, dy = j.ty - j.y, L = Math.hypot(dx, dy);
@@ -260,10 +272,10 @@ export class Host {
         }
       }
       // Fires, leaks and kittens wait until someone solves them. Only the thief can get away, and only if nobody is chasing.
-      if (j.t === 3 && j.stun <= 0 && (j.left -= dt) <= 0) { st.jobs.splice(i, 1); this.event('jobGone', { jt: j.t }); }
+      if (JOBS[j.t].name === 'thief' && j.stun <= 0 && (j.left -= dt) <= 0) { st.jobs.splice(i, 1); this.event('jobGone', { jt: j.t }); }
     }
     if (st.total >= 3 && !st.boss && (st.jobIn -= dt) <= 0) {
-      st.jobIn = 150; // a calm pace: a problem every few minutes, never two at once
+      st.jobIn = 240 + Math.random() * 180; // a calm pace: a problem every four to seven minutes, never two at once
       if (!st.jobs.length) this.spawnJob();
     }
     if ((this.itemIn -= dt) <= 0) {
