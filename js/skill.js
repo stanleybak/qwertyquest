@@ -376,13 +376,13 @@ export function lessonPrompt(p) {
 // Probes climb the ladder. Passing a probe places the player past it.
 // The first probes are gentle: one key at a time, then short home-row drills.
 export const PROBES = [
-  { step: 0, n: 5, cps: 0.25, place: 0, single: true },
-  { step: 2, n: 3, cps: 0.4, place: 3, drill: true },
-  { step: 4, n: 3, cps: 0.5, place: 5, drill: true },
-  { step: 4, n: 3, cps: 0.6, place: 5, word: true },
-  { step: 9, n: 3, cps: 0.8, place: 10 },
-  { step: 14, n: 3, cps: 1.0, place: NS },
-  { step: NS, n: 2, cps: 1.3, place: NS + 1 },
+  { step: 0, n: 8, cps: 0.25, place: 0, single: true },
+  { step: 2, n: 5, cps: 0.4, place: 3, drill: true },
+  { step: 4, n: 5, cps: 0.5, place: 5, drill: true },
+  { step: 4, n: 5, cps: 0.6, place: 5, word: true },
+  { step: 9, n: 4, cps: 0.8, place: 10 },
+  { step: 14, n: 4, cps: 1.0, place: NS },
+  { step: NS, n: 3, cps: 1.3, place: NS + 1 },
   { step: NS + 1, n: 2, cps: 1.8, place: NS + 2 },
   { step: NS + 2, n: 1, cps: 2.5, place: NS + 3 },
 ];
