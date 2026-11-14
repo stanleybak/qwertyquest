@@ -108,9 +108,10 @@ export function loadProfile() {
     lesson: { n: 0, hit: 0, miss: 0 }, keys: {}, streak: 0, bestStreak: 0,
     stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, rooms: {}, tips: {}, fresh: 12, shields: 0, crane: 0,
     wear: { hat: 'h0', tool: 't0', pet: 'p0', ride: 'r0' }, seen: ['h0', 't0', 'p0', 'r0'],
-    day: { date: '', lessons: 0, promos: 0 }, pacing: true, guide: true, sound: true, vol: 0.7,
+    day: { date: '', lessons: 0, promos: 0 }, pacing: true, guide: true, sound: true, vol: 0.5, volSet: false,
     layout: 'qwerty', other: null,
   }, p || {});
+  if (!p.volSet) p.vol = 0.5; // nobody picked a volume on this device yet: start in the middle
   setLayout(p.layout);
   rollDay(p);
   return p;

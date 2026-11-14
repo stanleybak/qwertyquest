@@ -936,7 +936,6 @@ function updateHud(now) {
   $('crew').textContent = !net.ready ? '🔎' : `👷 ${1 + crew}`;
   $('crew').title = `Builders in ${roomLabel}` + (net.isHost && crew ? ' (this device is keeping the city)' : '');
   $('comboBox').classList.toggle('hidden', !crew); // the team meter only matters with a team
-  $('btnSound').textContent = P.sound ? '🔊' : '🔇';
 }
 
 const cv = $('cv'), ctx = cv.getContext('2d');
@@ -1103,10 +1102,30 @@ $('btnKeys').onclick = () => {
   $('keys').classList.remove('hidden');
 };
 $('partyGo').onclick = () => { $('party').classList.add('hidden'); $('partyGo').blur(); };
-$('vol').value = P.vol;
-$('vol').oninput = e => { P.vol = +e.target.value; P.sound = P.vol > 0; S.saveProfile(P); };
-$('vol').onchange = e => { sfx.load(); e.target.blur(); };
-$('btnSound').onclick = () => { P.sound = !P.sound; if (P.sound && !P.vol) P.vol = 0.7; $('vol').value = P.sound ? P.vol : 0; S.saveProfile(P); if (!P.sound) window.speechSynthesis?.cancel(); };
+// Volume: the speaker button opens a slider under it; all the way down is mute.
+// The grown-ups panel has the same slider, and the two stay in step.
+function showVol() {
+  const v = P.sound ? P.vol : 0;
+  $('vol').value = v; $('volQuick').value = v;
+  $('volPct').textContent = Math.round(v * 100) + '%';
+  $('btnSound').textContent = v ? (v < 0.5 ? '🔉' : '🔊') : '🔇';
+}
+function setVol(v) {
+  P.vol = v; P.sound = v > 0; P.volSet = true;
+  S.saveProfile(P); showVol();
+  if (!v) window.speechSynthesis?.cancel();
+}
+function volOpen(open) {
+  $('volPop').classList.toggle('hidden', !open);
+  $('btnSound').setAttribute('aria-expanded', open);
+}
+for (const id of ['vol', 'volQuick']) {
+  $(id).oninput = e => setVol(+e.target.value);
+  $(id).onchange = e => { sfx.load(); e.target.blur(); }; // a sample at the new volume; blur so typing goes back to the game
+}
+showVol();
+addEventListener('pointerdown', e => { if (!$('soundWrap').contains(e.target)) volOpen(false); }, true);
+$('btnSound').onclick = () => { volOpen($('volPop').classList.contains('hidden')); $('btnSound').blur(); };
 $('aStep').onchange = e => { P.step = +e.target.value; P.credits = 0; P.fresh = 12; P.lesson = { n: 0, hit: 0, miss: 0 }; stopTyping(); S.saveProfile(P); };
 $('aPacing').onchange = e => { P.pacing = e.target.checked; S.saveProfile(P); };
 $('aGuide').onchange = e => { P.guide = e.target.checked; S.saveProfile(P); };

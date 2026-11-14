@@ -25,7 +25,10 @@
     <div id="powers" class="chip" title="Shield: forgives a slip. Crane: double loads. Fire: clean streak."></div>
     <div id="crew" class="chip" title="Builders here"></div>
     <button id="btnWear" title="Wardrobe">🎒</button>
-    <button id="btnSound" title="Sound">🔊</button>
+    <span id="soundWrap">
+      <button id="btnSound" title="Volume" aria-haspopup="true" aria-expanded="false">🔊</button>
+      <div id="volPop" class="hidden"><input id="volQuick" type="range" min="0" max="1" step="0.05" aria-label="Volume"><span id="volPct"></span></div>
+    </span>
     <button id="btnKeys" title="Keyboard layout and warm-up">⌨️</button>
     <button id="btnAdult" title="Grown-ups">⚙️</button>
   </div>
