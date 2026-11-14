@@ -50,6 +50,7 @@ time.sleep(0.3)
 key(Keys.ENTER)
 time.sleep(0.4)
 print("building game choices:", q("return window.__qq.CH.opts && window.__qq.CH.opts.length"))
+print("building progress kept per city:", q("return JSON.stringify(window.__qq.P.help)"))
 print("saved cities:", q("return Object.values(JSON.parse(localStorage.getItem('qq.worlds'))).map(w => w.name + ':' + w.total)"))
 for l in d.get_log("browser"):
     if "favicon" not in l["message"]:

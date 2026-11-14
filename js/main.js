@@ -9,7 +9,7 @@ import * as G from './games.js';
 import DATA from './content-data.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14h';
+const BUILD = '2026-11-14i';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -372,14 +372,14 @@ function chose(o) {
   if (m.game === 'maze') { g.path = G.runFrom(g.mz, g.cell, o.id); g.cell = g.path[g.path.length - 1]; }
   else {
     delete g.labels[o.id];
-    inside.placed++; inside.pop = 0; P.rooms[inside.id] = inside.placed;
+    inside.placed++; inside.pop = 0; rooms()[roomKey(inside.id)] = inside.placed;
     if (inside.placed >= 6) finishRoom();
   }
   tally({ text: o.text }, true, errs, 0);
 }
 /** The neighbor's problem is solved. */
 function finishRoom() {
-  inside.placed = 6; P.rooms[inside.id] = 6;
+  inside.placed = 6; rooms()[roomKey(inside.id)] = 6;
   P.thanks++;
   toast(`❤️ ${inside.m.who} says thank you!`, 'gold');
   sfx.win(); npc(`m_${inside.m.id}_done`); inside.talk = 7;
@@ -818,13 +818,17 @@ function doorAt() {
   }
   return null;
 }
+// How far this player has helped each neighbor: kept per city and per neighbor,
+// so a new city starts fresh and a building never inherits another one's progress.
+const rooms = () => (P.help[net.world.id] ||= {});
+const roomKey = id => { const [i, k] = id.split(':').map(Number); return `${id}:${missionFor(i, k).id}`; };
 /** The fire or leak in building `id`, if there is one. Those are solved indoors. */
 const jobIn = id => (st.jobs || []).find(j => j.site != null && `${j.d}:${j.site}` === id);
 function enterBuilding(id) {
   const [i, k] = id.split(':').map(Number);
   const m = missionFor(i, k);
   const job = jobIn(id);
-  let placed = Math.min(6, P.rooms[id] | 0);
+  let placed = Math.min(6, rooms()[roomKey(id)] | 0);
   if (m.game === 'maze' && placed < 6) placed = 0; // a maze starts over on each visit
   inside = { id, m, placed, pop: 1, x: job ? 0.96 : 0.86, y: job ? 0.5 : 0.35, talk: 7, wig: null, near: null, job: job ? job.id : 0, out: new Set(), nearF: -1, g: G.newGame(m, id, placed) };
   auto = null; held.clear(); stopTyping();
@@ -881,7 +885,7 @@ function finishPrompt(secs) {
   else sfx.load();
   if (!ok) { /* nothing delivered */ } else if (job && inside) inside.out.add(+key.split(':')[1]); // that fire is out
   else if (inside) {
-    inside.placed++; inside.pop = 0; P.rooms[inside.id] = inside.placed; inside.talk = 0;
+    inside.placed++; inside.pop = 0; rooms()[roomKey(inside.id)] = inside.placed; inside.talk = 0;
     if (inside.placed >= 6) finishRoom();
   } else if (job) floatText(JOBS[T.jobType]?.fx || '👍', me.x, me.y - 100, '#2f7de1');
   else if (boss && st.boss) fx.push({ text: '🧱', x: me.x, y: me.y - 60, vx: (st.boss.x - me.x) * 2.5, vy: (st.boss.y - 80 - me.y + 60) * 2.5, life: 0.4, size: 26 });
@@ -987,7 +991,7 @@ function updatePrompt() {
   else if (c.job) hint = `Press Enter to help. ${JOBS[c.job.t].hint}`;
   else if (c.base) hint = 'Press Enter to start building here.';
   else if (doorId && jobIn(doorId)) hint = `${JOBS[jobIn(doorId).t].icon} Trouble inside! Press Enter to go in and help.`;
-  else if (doorId) hint = P.rooms[doorId] >= 6 ? '🚪 Press Enter to visit.' : '🚪 Press Enter to go in and help.';
+  else if (doorId) hint = rooms()[roomKey(doorId)] >= 6 ? '🚪 Press Enter to visit.' : '🚪 Press Enter to go in and help.';
   else hint = 'Walk to a glowing circle. Press Enter for the nearest one.';
   $('hint').textContent = hint;
   return c.zone;
@@ -1181,7 +1185,7 @@ function frame(now) {
   }
   draw(ctx, {
     w: vw, h: vh, cam, st, t: now / 1000, me, others: liveOthers(now).filter(o => !o.inside),
-    door: doorId, roomDone: id => P.rooms[id] >= 6,
+    door: doorId, roomDone: id => rooms()[roomKey(id)] >= 6,
     zone, job: curJob, weak: st.boss ? S.weakKeys(P, 4) : [], bossHit, fx,
   });
   updateKb(T.p ? T.p.text[T.pos] : null);
