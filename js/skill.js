@@ -338,11 +338,16 @@ export function genPrompt(p, role = 0, boss = false) {
 
 // ---------- lessons and promotion ----------
 /** Count one keystroke toward the current lesson. */
-export function lessonKey(p, ok) { ok ? p.lesson.hit++ : p.lesson.miss++; }
+export function lessonKey(p, ok, ms = 0) {
+  ok ? p.lesson.hit++ : p.lesson.miss++;
+  if (ok && ms > 0 && ms < 4000) { p.lesson.t = (p.lesson.t || 0) + ms; p.lesson.k = (p.lesson.k || 0) + 1; } // for typing speed
+}
+// Keys per second that count as fast at each tier of the ladder (3 a second is about 36 words a minute).
+const FAST = [0, 1.6, 2.2, 2.6, 3, 3.5, 4];
 
 /**
  * Count one finished prompt. When a lesson ends, returns a summary:
- * { acc, stars, promoted, demoted, shiftDone, ready }.
+ * { acc, stars, promoted, fast (promoted for speed), demoted, shiftDone, ready }.
  */
 export function lessonPrompt(p) {
   rollDay(p);
@@ -350,6 +355,7 @@ export function lessonPrompt(p) {
   if (++p.lesson.n < LESSON_LEN) return null;
   const { hit, miss } = p.lesson;
   const acc = hit / Math.max(1, hit + miss);
+  const cps = p.lesson.k >= 12 ? p.lesson.k / (p.lesson.t / 1000) : 0;
   p.lesson = { n: 0, hit: 0, miss: 0 };
   const stars = acc >= 0.95 ? 3 : acc >= 0.9 ? 2 : 1;
   const good = stars === 3 || (early(p) && stars === 2);
@@ -364,6 +370,12 @@ export function lessonPrompt(p) {
       p.credits = Math.max(0, p.credits - 1);
       if (++p.badRun >= 2 && p.step > 0) { p.step--; p.credits = 0; p.badRun = 0; p.fresh = 12; res.demoted = true; }
     } else p.badRun = 0;
+  }
+  // Fast and nearly flawless: this step is already easy for this player, so move
+  // them straight up without waiting for more lessons or for tomorrow.
+  if (stars === 3 && miss <= 2 && cps >= FAST[tierOf(p.step)] && p.step < MAX_STEP && !res.demoted) {
+    p.step++; p.credits = 0; p.badRun = 0; p.fresh = 12; res.promoted = res.fast = true;
+    return res;
   }
   if (p.credits >= creditsNeeded(p) && p.step < MAX_STEP) {
     if (p.pacing && (p.day.promos | 0) >= (early(p) ? 5 : MAX_PROMOS)) { res.ready = !p.day.told; p.day.told = true; } // enough new things for one day

@@ -87,6 +87,12 @@ print("2 Ann fetched 2. Ann placed:", q(a, "return window.__qq.inside.placed"), 
 b.save_screenshot(str(OUT / "together.png"))
 fetch(b, 3)
 time.sleep(1.5)
+print("  when it is done:", a.find_element(By.ID, "hint").text)
+key(a, Keys.ENTER)
+time.sleep(0.4)
+print("  Ann pressed Enter: outside again:", q(a, "return !window.__qq.inside"))
+q(a, "window.__qq.enter('0:1')")
+time.sleep(0.5)
 print("3 Bob fetched the other 4 (from the back of the list). Ann placed:", q(a, "return window.__qq.inside.placed"), "done for Ann:", q(a, "return window.__qq.inside.fin"),
       "| Bob:", q(b, "return window.__qq.inside.placed"), q(b, "return window.__qq.inside.fin"))
 print("  city record:", q(a, "return JSON.stringify(window.__qq.st.rooms)"))
@@ -103,14 +109,31 @@ time.sleep(1.2)
 q(b, "window.__qq.enter('0:0')")
 time.sleep(0.5)
 print("4 Ann placed one thing in the house; Bob walks in later and sees:", q(b, "return window.__qq.inside.placed"), "| game:", q(b, "return window.__qq.inside.m.game"))
-# Ann starts on the second spot; Bob cannot take that one, but can do another at the same time
+# Ann stands at the second spot without starting: it is still free for Bob
 q(a, "const r=window.__qq.inside; r.x=0.53; r.y=0.1;")
-time.sleep(0.4)
+q(b, "const r=window.__qq.inside; r.x=0.53; r.y=0.1;")
+time.sleep(1.2)
+print("  Ann only standing there, Bob at the same spot:", b.find_element(By.ID, "hint").text)
+q(b, "const r=window.__qq.inside; r.x=0.9; r.y=0.5;")
+# Ann starts on the second spot; Bob cannot take that one, but can do another at the same time
 key(a, Keys.ENTER)
 time.sleep(1.2)
 q(b, "const r=window.__qq.inside; r.x=0.53; r.y=0.1;")
 time.sleep(0.5)
 print("  Bob at Ann's spot:", b.find_element(By.ID, "hint").text, "| Bob's glowing spot:", q(b, "return window.__qq.inside.want"))
+key(a, Keys.ESCAPE)
+time.sleep(1.2)
+print("  Ann pressed Esc:", b.find_element(By.ID, "hint").text)
+key(a, Keys.ENTER)
+time.sleep(1.2)
+key(a, Keys.ESCAPE)
+key(a, Keys.ESCAPE)  # Ann leaves the building
+time.sleep(1.2)
+print("  Ann started again, then left the building:", b.find_element(By.ID, "hint").text)
+q(a, "window.__qq.enter('0:0'); const r=window.__qq.inside; r.x=0.53; r.y=0.1;")
+time.sleep(0.5)
+key(a, Keys.ENTER)
+time.sleep(1.2)
 q(b, "const r=window.__qq.inside; r.x=0.36+2*0.17; r.y=0.85;")  # spot 6
 time.sleep(0.5)
 key(b, Keys.ENTER)
@@ -128,6 +151,18 @@ for who, d in (("A", a), ("B", b)):
     for l in d.get_log("browser"):
         if "favicon" not in l["message"] and "WebSocket" not in l["message"]:
             print("LOG", who, l["level"], l["message"][:240])
+
+# Ann and Bob are in the same building; if Bob is in a different scene there (a fire), Ann does not see him in her maze
+key(a, Keys.ESCAPE)
+key(a, Keys.ESCAPE)
+key(b, Keys.ESCAPE)
+key(b, Keys.ESCAPE)
+q(a, "window.__qq.enter('0:2')")
+q(b, "window.__qq.enter('0:2')")
+time.sleep(1.5)
+print("5b both in the maze: Ann sees", q(a, "return window.__qq.matesHere(performance.now()).map(o => o.name)"),
+      "| if Bob were at a fire there instead:", q(a, "for (const o of window.__qq.others.values()) o.scene = 'fire'; return window.__qq.matesHere(performance.now()).map(o => o.name)"))
+for d in (a, b):
     d.quit()
 
 # three players, where two of them cannot reach each other directly: all three still see everyone

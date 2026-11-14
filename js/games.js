@@ -151,7 +151,7 @@ function drawMaze(ctx, v, F) {
   const X = cx(g.px), Y = cy(g.py);
   for (const d of v.opts) emoji(ctx, ARROWS[d], X + DIRS[d][0] * cw * 0.4, Y + DIRS[d][1] * ch * 0.4, 20 + Math.sin(t * 6) * 2);
   const s = Math.min(0.75, ch / 100);
-  for (const o of v.mates) { ctx.save(); ctx.translate(cx(o.ix / 100), cy(o.iy / 100) + ch * 0.3); ctx.scale(s, s); v.drawMate(o, 0, 0); ctx.restore(); }
+  for (const o of v.mates) { ctx.save(); ctx.translate(cx(Math.min(MW - 1, Math.max(0, o.ix / 100))), cy(Math.min(MH - 1, Math.max(0, o.iy / 100))) + ch * 0.3); ctx.scale(s, s); v.drawMate(o, 0, 0); ctx.restore(); }
   ctx.save(); ctx.translate(X, Y + ch * 0.3); ctx.scale(s, s); v.drawMe(0, 0); ctx.restore();
 }
 

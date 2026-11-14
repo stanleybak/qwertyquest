@@ -46,6 +46,11 @@ for i in (1, 2):
 q(HELP % 3)
 time.sleep(0.5)
 print("4 helped everyone in neighborhood 4: back at the old frontier with its bricks:", state(), "|", hud())
+# fast and flawless skips ahead; flawless but slow earns a credit and waits
+TRY = "const q=window.__qq, P=q.P; P.step=%d; P.credits=0; P.lesson={n:11, hit:60, miss:%d, t:60*%d, k:60}; const r=q.S.lessonPrompt(P); return JSON.stringify({step:P.step, credits:P.credits, fast:!!r.fast, promoted:r.promoted})"
+print("5 level 7, no mistakes, 5 keys a second:", q(TRY % (6, 0, 200)))
+print("  level 7, no mistakes, 1 key a second:", q(TRY % (6, 0, 1000)))
+print("  level 7, fast but 6 mistakes:", q(TRY % (6, 6, 200)))
 for l in d.get_log("browser"):
     if "favicon" not in l["message"] and "WebSocket" not in l["message"]:
         print("LOG", l["level"], l["message"][:240])

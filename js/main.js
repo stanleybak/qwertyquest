@@ -10,7 +10,7 @@ import DATA from './content-data.js';
 import VERSION from './version.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14p';
+const BUILD = '2026-11-14s';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -257,9 +257,10 @@ function typeChar(ch) {
   const want = T.p.text[T.pos], now = performance.now();
   if (!T.t0) T.t0 = now;
   if (ch === want) {
+    const before = T.last;
     S.recordKey(P, want, true, T.pos > 0 ? now - T.last : 0);
     T.last = now; T.hits++; T.pos++;
-    if (mode === 'game') S.lessonKey(P, true);
+    if (mode === 'game') S.lessonKey(P, true, T.pos > 1 ? now - before : 0);
     firstHit(want);
     sfx.key();
     if (T.pos >= T.p.text.length) { const cb = T.onDone; cb((now - T.t0) / 1000); return; }
@@ -338,7 +339,7 @@ function typeChoice(ch) {
   const now = performance.now(), next = CH.buf + ch;
   const live = CH.opts.filter(o => o.text.startsWith(CH.buf));
   if (live.some(o => o.text.startsWith(next))) {
-    S.recordKey(P, ch, true, CH.buf ? now - T.last : 0); S.lessonKey(P, true);
+    S.recordKey(P, ch, true, CH.buf ? now - T.last : 0); S.lessonKey(P, true, CH.buf ? now - T.last : 0);
     T.last = now; CH.buf = next; sfx.key(); firstHit(ch);
     const hit = CH.opts.find(o => o.text === next);
     if (hit) chose(hit); else paintChoices();
@@ -593,10 +594,10 @@ const handlers = {
       o.walk = !!(data[3] & 1); if (data[3] & 2) o.stumble = 0.5;
       o.face = data[4] < 0 ? -1 : 1;
       o.boat = !!(data[3] & 4); o.inside = !!(data[3] & 8); o.act = data[5] | 0;
-      const was = o.in;
+      const was = o.in, wasScene = o.scene;
       o.in = o.inside && typeof data[6] === 'string' ? data[6].slice(0, 12) : ''; o.tix = +data[7] || 0; o.tiy = +data[8] || 0;
-      if (o.in !== was) { o.ix = o.tix; o.iy = o.tiy; } // just walked in: appear at the spot, then glide from there
-      o.want = o.in && Number.isInteger(data[9]) ? data[9] : -1;
+      o.want = o.in && Number.isInteger(data[9]) ? data[9] : -1; o.scene = typeof data[10] === 'string' ? data[10].slice(0, 8) : '';
+      if (o.in !== was || o.scene !== wasScene) { o.ix = o.tix; o.iy = o.tiy; }
       if (!o.seen) { o.x = o.tx; o.y = o.ty; o.seen = true; }
       o.at = performance.now();
     } else if (kind === 'me') {
@@ -813,7 +814,7 @@ function whereInside() {
 }
 function sendPos() {
   if (!net || !net.peers.size) return;
-  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0), me.face, me.act, ...(inside ? [...whereInside(), inside.want] : [])];
+  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0), me.face, me.act, ...(inside ? [...whereInside(), claim(), scene()] : [])];
   const k = m.join(), now = performance.now();
   if (now - lastMe > 8000) { lastMe = now; net.broadcast('me', profileMsg()); } // names reach anyone who missed the first hello
   if (k === lastPos && now - lastPosAt < 1000) return;
@@ -892,8 +893,20 @@ function enterBuilding(id) {
   if (job) greeted.add(job.id);
   npc(job ? `job${job.t}` : placed >= 6 ? `m_${m.id}_done` : `m_${m.id}`);
 }
-/** Others in the same building as this player. */
-const matesHere = now => (inside ? liveOthers(now).filter(o => o.in === inside.id) : []);
+/**
+ * The slot this player tells the others is theirs. In a fetch game that is the
+ * item they were given. In a room it is only the spot they are typing at right
+ * now: a spot is free again the moment they stop or walk out.
+ */
+function claim() {
+  if (!inside || inside.job) return -1;
+  if (inside.m.game === 'order') return inside.want;
+  return inside.m.game === 'furnish' && engaged && engaged.startsWith('i') ? +engaged.split(':').pop() : -1;
+}
+/** What this player is doing in the building. A fire in the bakery and the bakery's own game are different scenes. */
+const scene = () => (inside.job ? 'fire' : inside.m.game);
+/** Others in the same building and the same scene as this player. */
+const matesHere = now => (inside ? liveOthers(now).filter(o => o.in === inside.id && o.scene === scene()) : []);
 /** The player in this building who has claimed slot i, if any. */
 const takenBy = i => matesHere(performance.now()).find(o => o.want === i);
 /**
@@ -993,7 +1006,7 @@ function tally(p, clean, errs, secs) {
     if (res.promoted) {
       const fresh = P.step < S.STAGES.length ? `New keys: ${S.STAGES[P.step].keys.toUpperCase().split('').join(' and ')}` : `New job: ${S.stepName(P.step)}`;
       const keys = P.step < S.STAGES.length ? S.STAGES[P.step].keys.split('') : [];
-      setTimeout(() => party(keys.length ? 'New keys unlocked!' : 'Promotion!', keys, keys.length ? 'The keyboard picture will show you where they are.' : fresh), 900);
+      setTimeout(() => party(keys.length ? 'New keys unlocked!' : 'Promotion!', keys, (res.fast ? 'So fast and so accurate: you get to skip ahead! ' : '') + (keys.length ? 'The keyboard picture will show you where they are.' : fresh)), 900);
     }
     if (res.ready) setTimeout(() => toast('That is plenty of new keys for one day. More unlock tomorrow: sleep makes fingers smarter!'), 900);
     if (res.demoted) setTimeout(() => toast('Let\'s spend a little more time on the last keys.'), 900);
@@ -1065,11 +1078,11 @@ function updatePrompt() {
     hint = c.base ? `Press Enter to ${c.job.t ? 'fix this leak' : 'spray this fire'}.` : `Walk to a ${what} with the arrow keys.  (Esc to go outside)`;
   } else if (inside && inside.m.game !== 'furnish') {
     const m = inside.m;
-    hint = !c.base ? 'All done here! Press Esc to go back outside.'
+    hint = !c.base ? 'All done here! Press Enter to go back outside.'
       : (m.game === 'maze' ? `Press Enter to start looking for ${m.goal}.` : m.game === 'run' ? `Press Enter to start running to ${m.goal}.` : `Press Enter to start fetching things for ${m.who}.`) + '  (Esc to go outside)';
   } else if (inside) {
     const sp = inside.near, all = inside.placed >= inside.m.items.length;
-    hint = !sp ? (all ? 'All done here! Look around, talk, or leave by the door.' : 'Walk to the glowing spot with the arrow keys.')
+    hint = !sp ? (all ? 'All done here! Press Enter to go back outside.' : 'Walk to the glowing spot with the arrow keys.')
       : sp.kind === 'npc' ? `Press Enter to talk to ${inside.m.who}.`
         : sp.kind === 'door' ? 'Press Enter to go back outside.'
           : inside.mask >> sp.i & 1 ? 'Press Enter to take a look.'
@@ -1126,9 +1139,11 @@ function pressEnter() {
     engaged = c.base; auto = null; return;
   }
   if (inside) {
-    if (!roomWalk() || inside.job) return;
+    // Enter always does the main thing: start the work, or, once it is all done, go back outside.
+    if (inside.job) return;
+    if (inside.m.game !== 'furnish') { if (inside.placed >= 6) leaveBuilding(); return; }
     const sp = inside.near;
-    if (!sp) return;
+    if (!sp) { if (inside.placed >= 6) leaveBuilding(); return; }
     if (sp.kind === 'door') leaveBuilding();
     else if (sp.kind === 'npc') { inside.talk = 7; npc(inside.placed >= inside.m.items.length ? `m_${inside.m.id}_done` : `m_${inside.m.id}`); }
     else if (inside.mask >> sp.i & 1) { inside.wig = { i: sp.i, t: 0.6 }; beep(700 + sp.i * 80, 0.12, 'triangle', 0.07); }
@@ -1341,7 +1356,7 @@ function frame(now) {
     updateKb(nextKey());
     const drawMe = (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: inside.walk }, x, y, now / 1000);
     const job = inside.job && st.jobs.find(j => j.id === inside.job);
-    const mates = liveOthers(now).filter(o => o.in === inside.id); // others in this same building
+    const mates = matesHere(now); // others in this same building, doing the same thing
     const colorOf = o => COLORS[o.color % COLORS.length];
     const drawMate = (o, x, y) => drawPlayer(ctx, { ...o, boat: false }, x, y, now / 1000);
     if (job || inside.m.game !== 'furnish') G.drawGame(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, g: inside.g, placed: inside.placed, pop: inside.pop, opts: CH.opts ? CH.opts.map(o => o.id) : [], job, out: inside.out, nearF: inside.nearF, x: inside.x, y: inside.y, drawMe, mates, drawMate, mask: inside.mask, want: inside.want, colorOf });
@@ -1476,4 +1491,4 @@ initStart();
 let resume = false;
 try { resume = !!sessionStorage.getItem('qq.resume'); sessionStorage.removeItem('qq.resume'); } catch { /* ignore */ }
 if (resume && P.name && P.placed) { $('start').classList.add('hidden'); startGame(); }
-window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, others, roomKeyOf, get vote() { return st.vote; }, district, party }; // for debugging in the console
+window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, others, roomKeyOf, S, matesHere, get vote() { return st.vote; }, district, party }; // for debugging in the console
