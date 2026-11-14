@@ -7,7 +7,7 @@ import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-13i';
+const BUILD = '2026-11-13j';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -490,7 +490,7 @@ function enterBuilding(id) {
 function leaveBuilding() { inside = null; stopTyping(); Voice.stop(); }
 /** Put the keyboard down: no challenge runs until the player presses Enter again. */
 function stopTyping() {
-  engaged = null; T.key = null;
+  engaged = null; T.key = null; redo.length = 0; lastSlip = false; // each challenge is its own deck
   setPrompt(null, { prompt: $('prompt'), found: $('found') }, null);
 }
 const nearMe = (x, y) => Math.hypot(x - me.x, y - me.y) < 900;
@@ -595,12 +595,13 @@ function updatePrompt() {
       const role = c.base === 'boss' || c.job || inside ? 0 : myRole();
       while (redo.length && redo[0].step !== P.step) redo.shift(); // the level changed: let old retries go
       let p;
-      if (redo.length && redoGap-- <= 0) p = { ...redo.shift(), redo: true };
+      // retries are dealt back in at random, and always before the challenge can end
+      if (redo.length && (redoGap-- <= 0 || redo.length >= leftIn(c))) p = { ...redo.shift(), redo: true };
       else p = S.genPrompt(P, role, c.base === 'boss');
       setPrompt(p, { prompt: $('prompt'), found: $('found') }, finishPrompt);
       tip('type');
       $('hint').textContent = (p.redo ? '↩ Second chance: type this one with no slips to deliver it.'
-        : lastSlip ? 'That one had a slip, so it will come back. No slips means it counts!'
+        : lastSlip ? 'That one had a slip, so its dot turned purple and it will come back.'
           : inside ? `Type to bring in the next thing for ${inside.m.who}.`
         : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
           : c.job ? JOBS[c.job.t].hint
@@ -627,22 +628,33 @@ function updatePrompt() {
   return c.zone;
 }
 
-/** One dot per prompt still to do in this challenge; purple ones are retries waiting in the deck. */
-let dotsKey = '';
+/** How many clean prompts this challenge still needs. */
+function leftIn(c) {
+  if (!engaged) return 0;
+  if (inside) return inside.m.items.length - inside.placed;
+  if (c.base === 'boss') return st.boss ? st.boss.hp : 0;
+  if (c.job) return c.job.hp;
+  return c.zone >= 0 ? district(st.d).sites[c.zone].need - st.have[c.zone] : 0;
+}
+/**
+ * One dot per prompt left in this challenge. Type one with no slips and a dot
+ * goes away. A slip turns a dot purple: that prompt is still owed and comes
+ * back. The purple ones are part of the count, not extra.
+ */
+let dotsKey = '', dotsLeft = 0;
 function paintDots(c) {
-  let left = 0;
-  if (engaged) {
-    if (inside) left = inside.m.items.length - inside.placed;
-    else if (c.base === 'boss') left = st.boss ? st.boss.hp : 0;
-    else if (c.job) left = c.job.hp;
-    else if (c.zone >= 0) left = district(st.d).sites[c.zone].need - st.have[c.zone];
-  }
-  const again = engaged ? redo.length : 0, key = `${left}:${again}`;
+  const left = leftIn(c), again = Math.min(redo.length, left), key = `${left}:${again}`;
   if (key === dotsKey) return;
-  dotsKey = key;
+  const gone = engaged ? Math.max(0, dotsLeft - left) : 0; // dots just cleared, by this player or a teammate
+  dotsKey = key; dotsLeft = left;
   const el = $('dots'); el.innerHTML = '';
-  for (let i = 0; i < Math.min(24, left); i++) { const d = document.createElement('i'); if (i === 0) d.className = 'now'; el.appendChild(d); }
-  for (let i = 0; i < again; i++) { const d = document.createElement('i'); d.className = 'again'; el.appendChild(d); }
+  for (let i = 0; i < Math.min(4, gone); i++) { const d = document.createElement('i'); d.className = 'pop'; el.appendChild(d); }
+  if (gone) setTimeout(() => el.querySelectorAll('.pop').forEach(x => x.remove()), 450);
+  if (!left) return;
+  for (let i = 0; i < Math.min(24, left); i++) { const d = document.createElement('i'); if (i >= left - again) d.className = 'again'; el.appendChild(d); }
+  const t = document.createElement('span');
+  t.textContent = `${left} to go` + (again ? ` (${again} to try again)` : '');
+  el.appendChild(t);
 }
 
 /** Enter: start the work here, or use whatever the player is standing at. */
