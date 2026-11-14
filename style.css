@@ -131,3 +131,4 @@ button.city:hover { border-color: var(--accent); }
 .ask button { margin: 10px 8px 0 0; font-size: 1.15rem; font-weight: 800; }
 .ask button.yes { background: var(--good); color: #fff; }
 #update { position: fixed; left: 12px; top: 72px; z-index: 6; }
+#kb .k.rh { margin-left: calc(var(--kp) * 0.4); } /* a small gap between the two hands */

@@ -1,4 +1,5 @@
 import JOBS from './jobs.js';
+import { missionFor } from './missions.js';
 export { JOBS }; // city problems that pop up and need typing to fix
 
 // The shared city. The host runs these rules; everyone else just renders the
@@ -114,6 +115,8 @@ export function newState() {
     boss: null, bossIn: 420, round: 0, roundLeft: 300,
     roles: {}, order: [], items: [], itemId: 1, ev: [], evId: 0,
     jobs: [], jobId: 1, jobIn: 150,
+    built: 0, next: null, // neighborhoods already constructed beyond the frontier (see Host.settle)
+    rooms: {}, // how far each neighbor inside a building has been helped, 0 to 6: shared by everyone
   };
 }
 // Cities this device has been part of: { id: { key, name, d, have, total, at } }.
@@ -124,7 +127,7 @@ export function loadWorlds() {
 }
 export function saveWorld(world, st) {
   const all = loadWorlds();
-  all[world.id] = { key: world.key, name: world.name, apart: !!world.apart, d: st.d, have: st.have, total: st.total, at: Date.now() };
+  all[world.id] = { key: world.key, name: world.name, apart: !!world.apart, d: st.d, have: st.have, total: st.total, rooms: st.rooms || {}, built: st.built | 0, next: st.next || null, at: Date.now() };
   const ids = Object.keys(all).sort((a, b) => all[b].at - all[a].at);
   for (const id of ids.slice(8)) delete all[id]; // keep the eight most recent
   try { localStorage.setItem(SAVES, JSON.stringify(all)); } catch { /* ignore */ }
@@ -144,9 +147,14 @@ export function legacyWorld(room) {
   return null;
 }
 
+/** The city's record key for the neighbor in building k of neighborhood i. */
+export const roomKeyOf = (i, k) => `${i}:${k}:${missionFor(i, k).id}`;
+/** Is this a believable building key, like "3:2:baker", in a neighborhood that exists? */
+const roomOk = (k, d) => typeof k === 'string' && /^\d{1,4}:[0-5]:[a-z]{1,12}$/.test(k) && parseInt(k) <= d;
+
 /** Host-side rules. `st` is the live state object; mutate it in place. */
 export class Host {
-  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 90; this.recent = []; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
+  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 90; this.recent = []; st.rooms ||= {}; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
 
   /** Start a city problem that suits this neighborhood and has not come up lately. */
   spawnJob() {
@@ -197,10 +205,39 @@ export class Host {
     const add = Math.min(n, need - st.have[siteIdx]);
     st.have[siteIdx] += add; st.total += add;
     if (st.have[siteIdx] >= need) this.event('built', { site: siteIdx, d: st.d });
-    if (D.sites.every((x, k) => st.have[k] >= x.need)) {
-      this.event('district', { d: st.d, name: D.name });
-      st.d++; st.have = [0, 0, 0, 0, 0, 0]; st.items = [];
-      if (st.boss) st.boss = null;
+    this.settle();
+  }
+
+  /** Has every neighbor in neighborhood i been helped? */
+  helped(i) {
+    for (let k = 0; k < 6; k++) if (!((this.st.rooms[roomKeyOf(i, k)] | 0) >= 6)) return false;
+    return true;
+  }
+  /**
+   * Keep the city's frontier honest. A neighborhood is finished when all six
+   * buildings are built AND all six neighbors inside have been helped; only
+   * then does the next one open. A city that got ahead of that (older versions
+   * opened land on bricks alone) steps back to its earliest unfinished
+   * neighborhood. What was already built further out is remembered and comes
+   * back as the city reaches it again.
+   */
+  settle() {
+    const st = this.st;
+    for (let i = 0; i < st.d; i++) {
+      if (this.helped(i)) continue;
+      if (st.d >= (st.built | 0)) st.next = { d: st.d, have: st.have }; // the half-built frontier
+      st.built = Math.max(st.built | 0, st.d);
+      st.d = i; st.have = district(i).sites.map(s => s.need);
+      st.boss = null; st.items = []; st.jobs = [];
+      this.event('back', { d: i, name: district(i).name });
+      break;
+    }
+    while (district(st.d).sites.every((s, k) => st.have[k] >= s.need) && this.helped(st.d)) {
+      this.event('district', { d: st.d, name: district(st.d).name });
+      st.d++; st.items = []; st.jobs = []; st.boss = null;
+      st.have = st.d < (st.built | 0) ? district(st.d).sites.map(s => s.need)
+        : st.next && st.next.d === st.d ? st.next.have.slice() : [0, 0, 0, 0, 0, 0];
+      if (st.next && st.next.d <= st.d) st.next = null;
     }
   }
   /** A bonus load on every unfinished site. */
@@ -222,6 +259,12 @@ export class Host {
       st.combo += 0.02 + 0.03 * frac; // a team bonus every few minutes, not every few prompts
     } else { st.combo = Math.max(0, st.combo - 0.12); return; } // a prompt with a slip delivers nothing
     if (st.combo >= 1) { st.combo = 0; this.event('gold'); this.sprinkle(1); }
+    if (roomOk(m.room, st.d)) { // work inside a building counts for everyone in the city
+      const was = st.rooms[m.room] | 0, now = m.all ? 6 : Math.min(6, was + 1);
+      st.rooms[m.room] = now;
+      if (was < 6 && now >= 6) this.event('room', { room: m.room, by: from });
+      this.settle();
+    }
     if (m.job) {
       const i = st.jobs.findIndex(j => j.id === m.job);
       if (i < 0) return;
@@ -245,6 +288,12 @@ export class Host {
     this.addLoads(m.site | 0, m.n === 2 ? 2 : 1);
   }
 
+  /** Someone is busy typing at a runaway: it stays put for them. */
+  hold(m) {
+    const j = this.st.jobs.find(x => x.id === (m && m.job));
+    if (j && JOBS[j.t].kind === 'run') j.stun = Math.max(j.stun, 3);
+  }
+
   grab(from, m) {
     const i = this.st.items.findIndex(x => x.id === m.id);
     if (i < 0) return null;
@@ -259,20 +308,22 @@ export class Host {
   offer(w) {
     const st = this.st;
     if (!w || typeof w.total !== 'number' || !Number.isInteger(w.d) || w.d < 0 || !Array.isArray(w.have) || w.have.length !== 6) return;
-    if (w.d < st.d) return;
+    for (const [k, n] of Object.entries(w.rooms && typeof w.rooms === 'object' ? w.rooms : {}).slice(0, 2000)) {
+      if (roomOk(k, Math.max(st.d, w.d))) st.rooms[k] = Math.max(st.rooms[k] | 0, Math.min(6, Math.max(0, n | 0)));
+    }
+    if (w.d < st.d) { st.built = Math.max(st.built | 0, w.built | 0, w.d); this.settle(); return; }
     const sites = district(w.d).sites, theirs = w.have.map((n, k) => Math.min(sites[k].need, Math.max(0, n | 0)));
     const before = st.d + ':' + st.have.join();
     if (w.d > st.d) { st.d = w.d; st.have = theirs; st.boss = null; st.items = []; st.jobs = []; }
     else st.have = st.have.map((n, k) => Math.max(n, theirs[k]));
     st.total = Math.max(st.total, w.total);
     if (before !== st.d + ':' + st.have.join()) this.event('merged'); // the city just grew
-    if (sites.every((s, k) => st.have[k] >= s.need)) { // together they had finished it
-      this.event('district', { d: st.d, name: district(st.d).name });
-      st.d++; st.have = [0, 0, 0, 0, 0, 0]; st.items = []; st.jobs = []; st.boss = null;
-    }
+    st.built = Math.max(st.built | 0, w.built | 0);
+    this.settle();
   }
 
   tick(dt) {
+    this.settle();
     const st = this.st, D = district(st.d);
     if ((st.roundLeft -= dt) <= 0) { st.round++; st.roundLeft = 300; this.assignRoles(); this.event('round'); }
     for (const id of st.order) if (!(id in st.roles)) { this.assignRoles(); break; }

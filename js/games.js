@@ -148,6 +148,7 @@ function drawMaze(ctx, v, F) {
   const X = cx(g.px), Y = cy(g.py);
   for (const d of v.opts) emoji(ctx, ARROWS[d], X + DIRS[d][0] * cw * 0.4, Y + DIRS[d][1] * ch * 0.4, 20 + Math.sin(t * 6) * 2);
   const s = Math.min(0.75, ch / 100);
+  for (const o of v.mates) { ctx.save(); ctx.translate(cx(o.ix / 100), cy(o.iy / 100) + ch * 0.3); ctx.scale(s, s); v.drawMate(o, 0, 0); ctx.restore(); }
   ctx.save(); ctx.translate(X, Y + ch * 0.3); ctx.scale(s, s); v.drawMe(0, 0); ctx.restore();
 }
 
@@ -171,6 +172,7 @@ function drawRun(ctx, v, F) {
     ctx.globalAlpha = 1;
   }
   emoji(ctx, m.goal, sx(runX(6)), ground - 34 + Math.sin(t * 4) * 4, 68);
+  for (const o of v.mates) v.drawMate(o, sx(o.ix), ground + 10);
   v.drawMe(sx(g.rx), ground + 10 - lift);
   ctx.restore();
   title(ctx, F, `${m.title.toUpperCase()}: get to ${m.goal}`);
@@ -205,6 +207,7 @@ function drawOrder(ctx, v, F) {
   ctx.font = '800 16px system-ui'; ctx.fillStyle = '#0007'; ctx.textAlign = 'center'; ctx.fillText(m.who, nx, ny + 54);
   emoji(ctx, '🧺', R.fx(0.24), ny + 30 - Math.max(0, 0.25 - v.pop) * 60, 50);
   ctx.font = '800 16px system-ui'; ctx.fillStyle = '#0007'; ctx.fillText(`${Math.min(6, v.placed)} of 6`, R.fx(0.24), ny + 66);
+  v.mates.forEach((o, n) => v.drawMate(o, R.fx(0.62 + n * 0.09), R.fy(0.6)));
   v.drawMe(R.fx(0.52), R.fy(0.6));
 }
 
@@ -224,13 +227,15 @@ function drawRescue(ctx, v, F) {
   };
   live.filter(i => i < 5).forEach(draw);
   emoji(ctx, m.face, R.fx(0.04), R.floorY - 4 + Math.sin(t * 14) * 2, 60);
+  for (const o of v.mates) v.drawMate(o, R.fx(o.ix / 1000), R.fy(o.iy / 1000));
   v.drawMe(R.fx(v.x), R.fy(v.y));
   live.filter(i => i >= 5).forEach(draw);
 }
 
 /**
  * Draw a building's game.
- * v: { w, h, ph, t, m, g, placed, pop, opts (ids of the choices on offer), job, out, nearF, x, y, drawMe(x, y) }
+ * v: { w, h, ph, t, m, g, placed, pop, opts (ids of the choices on offer), job, out, nearF, x, y, drawMe(x, y),
+ *      mates (others in this building, with ix, iy), drawMate(o, x, y) }
  */
 export function drawGame(ctx, v) {
   ctx.fillStyle = '#2b2340'; ctx.fillRect(0, 0, v.w, v.h);

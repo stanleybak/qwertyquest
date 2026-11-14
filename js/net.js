@@ -131,7 +131,7 @@ export class Net {
       console.warn('network unavailable, playing solo', e);
       this.room = null; return;
     }
-    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'ask', 'welcome', 'deny']) {
+    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'hold', 'ask', 'welcome', 'deny']) {
       const a = this.acts[kind] = this.room.makeAction(kind);
       a.onMessage((data, ctx) => this._recv(kind, data, ctx.userId));
     }
@@ -204,8 +204,10 @@ export class Net {
   /** Host: let a device into the city. */
   admit(id) {
     if (!this.isHost || !this.peers.has(id)) return;
-    if (!this.order.includes(id)) { this.order.push(id); this.h.onPeers(id, true); }
-    this._send('welcome', this.world, id);
+    const fresh = !this.order.includes(id);
+    if (fresh) this.order.push(id);
+    this._send('welcome', this.world, id); // first, so the newcomer is listening when greetings arrive
+    if (fresh) this.h.onPeers(id, true);
   }
   /** Host: turn a device away. */
   deny(id) { this._send('deny', {}, id); }
@@ -260,7 +262,7 @@ export class Net {
       return;
     }
     if (!this.world || !this.order.includes(from)) return; // only members of this city are heard
-    if ((kind === 'done' || kind === 'grab' || kind === 'offer') && !this.isHost) return;
+    if ((kind === 'done' || kind === 'grab' || kind === 'offer' || kind === 'hold') && !this.isHost) return;
     this.h.onMsg(kind, data, from);
   }
 

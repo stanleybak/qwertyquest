@@ -1,7 +1,7 @@
 // QwertyQuest: screens, input, the typing engine, and the frame loop.
 import * as S from './skill.js';
 import { Net, findRoom } from './net.js';
-import { Host, newState, loadWorlds, saveWorld, dropWorld, legacyWorld, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
+import { Host, newState, loadWorlds, saveWorld, dropWorld, legacyWorld, roomKeyOf, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
 import * as Voice from './voice.js';
 import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
@@ -10,7 +10,7 @@ import DATA from './content-data.js';
 import VERSION from './version.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14i';
+const BUILD = '2026-11-14l';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -182,7 +182,8 @@ function buildKb() {
     const add = (label, cls) => { const k = document.createElement('div'); k.className = 'k ' + cls; k.textContent = label; row.appendChild(k); return k; };
     if (r === 3) keyEl.shiftL = add('shift', 'wide f0');
     [...lo].forEach((c, i) => {
-      const el = add(c.toUpperCase(), `f${fing[i]}` + (r === 2 && (i < 4 || (i > 5 && i < 10)) ? ' home' : ''));
+      const el = add(c.toUpperCase(), `f${fing[i]}` + (r === 2 && (i < 4 || (i > 5 && i < 10)) ? ' home' : '')
+        + (i > 0 && fing[i] >= 4 && fing[i - 1] < 4 ? ' rh' : '')); // rh: the first key of the right hand
       keyEl[c] = { el, shift: false, right: fing[i] >= 4 };
       keyEl[up[i]] = { el, shift: true, right: fing[i] >= 4 };
     });
@@ -190,7 +191,7 @@ function buildKb() {
     kb.appendChild(row);
   });
   const row = document.createElement('div'); row.className = 'r';
-  row.style.paddingLeft = 'calc(var(--kp) * 4)';
+  row.style.paddingLeft = 'calc(var(--kp) * 4.2)';
   const sp = document.createElement('div'); sp.className = 'k space f8 on'; sp.textContent = 'space';
   row.appendChild(sp); kb.appendChild(row);
   keyEl[' '] = { el: sp, shift: false, right: false };
@@ -368,19 +369,18 @@ function chose(o) {
     return;
   }
   sfx.load();
-  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0 });
+  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'order' ? roomKey(inside.id) : undefined });
   CH.opts = null; $('prompt').innerHTML = '';
   if (m.game === 'maze') { g.path = G.runFrom(g.mz, g.cell, o.id); g.cell = g.path[g.path.length - 1]; }
   else {
     delete g.labels[o.id];
-    inside.placed++; inside.pop = 0; rooms()[roomKey(inside.id)] = inside.placed;
-    if (inside.placed >= 6) finishRoom();
+    inside.placed++; inside.pop = 0;
   }
   tally({ text: o.text }, true, errs, 0);
 }
-/** The neighbor's problem is solved. */
+/** The neighbor's problem is solved, by this player or by someone else working in the same building. */
 function finishRoom() {
-  inside.placed = 6; rooms()[roomKey(inside.id)] = 6;
+  inside.fin = true; inside.placed = 6;
   P.thanks++;
   toast(`❤️ ${inside.m.who} says thank you!`, 'gold');
   sfx.win(); npc(`m_${inside.m.id}_done`); inside.talk = 7;
@@ -528,7 +528,7 @@ const handlers = {
       lastEv = st.evId;
       // This device's own copy of the city may hold work the host has not seen: offer it, and the host keeps the best of both.
       const mine = loadWorlds()[net.world.id];
-      if (mine && (mine.d > st.d || (mine.d === st.d && mine.have.some((n, k) => n > st.have[k])))) net.toHost('offer', mine);
+      if (mine) net.toHost('offer', mine);
       if (mode === 'lobby') enterCity();
     }
     handleEvents();
@@ -590,6 +590,7 @@ const handlers = {
       o.walk = !!(data[3] & 1); if (data[3] & 2) o.stumble = 0.5;
       o.face = data[4] < 0 ? -1 : 1;
       o.boat = !!(data[3] & 4); o.inside = !!(data[3] & 8); o.act = data[5] | 0;
+      o.in = o.inside && typeof data[6] === 'string' ? data[6].slice(0, 12) : ''; o.ix = +data[7] || 0; o.iy = +data[8] || 0;
       if (!o.seen) { o.x = o.tx; o.y = o.ty; o.seen = true; }
       o.at = performance.now();
     } else if (kind === 'me') {
@@ -602,6 +603,7 @@ const handlers = {
     else if (!host) return;
     else if (kind === 'done') host.done(from, data || {});
     else if (kind === 'offer') host.offer(data);
+    else if (kind === 'hold') host.hold(data);
     else if (kind === 'grab') {
       const it = host.grab(from, data || {});
       if (it) from === net.selfId ? grant(it.t) : net.sendTo(from, 'grant', { t: it.t });
@@ -620,6 +622,11 @@ function handleEvents() {
     } else if (ev.t === 'gold') { toast('⭐ Team combo! Bonus bricks for every site.', 'gold'); if (!busy()) { sfx.win(); npc('combo'); } }
     // City problems and the monster never interrupt: they are announced when the player walks up to them (see greet()).
     else if (ev.t === 'boss' || ev.t === 'job') { /* quiet */ }
+    else if (ev.t === 'room') { // someone finished helping a neighbor; those inside hear it from the neighbor instead
+      const who = ev.by === net.selfId ? '' : others.get(ev.by)?.name;
+      if (who && !inside) toast(`⭐ ${who} helped a neighbor. That building is done for everyone!`);
+    }
+    else if (ev.t === 'back') toast(`🔑 Every neighbor needs help before new land opens. Back to ${ev.name}: go inside the ❗ buildings!`, 'gold');
     else if (ev.t === 'merged') toast('🏗️ Two cities joined into one. The best of both was kept!', 'gold');
     else if (ev.t === 'bossWin') { if (engaged === 'boss' || !busy()) { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); npc('bosswin'); } }
     else if (ev.t === 'bossFlee') { if (!busy()) { toast('The Typo Monster kicked a brick loose and wandered off.'); npc('bossflee'); } }
@@ -694,7 +701,7 @@ function hostCity(id, apart) {
   const world = saved ? { id, key: saved.key, name: saved.name, apart } : { id: rid(), key: rid(), name: `${P.name}'s city`, apart };
   pickedApart = !!apart;
   st = newState();
-  if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total });
+  if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total, rooms: { ...saved.rooms }, built: saved.built | 0, next: saved.next || null });
   host = new Host(st);
   net.open(world);
   enterCity();
@@ -799,6 +806,10 @@ function enterCity() {
   $('lobby').classList.add('hidden');
   $('hud').classList.remove('hidden'); $('panel').classList.remove('hidden');
   saveWorld(net.world, st); savedTotal = st.total; // remember this city (and its key) from the first moment
+  // Help given inside buildings used to be kept per player. Hand it to the city so everyone has it.
+  const mine = P.help[net.world.id];
+  if (mine && Object.keys(mine).length) net.toHost('offer', { d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, rooms: mine });
+  delete P.help[net.world.id];
   const D = district(st.d), at = P.pos;
   // back where this player was standing, if that spot is still part of this city
   if (at && at.w === net.world.id && Number.isFinite(at.x) && Number.isFinite(at.y) && walkable(at.x, at.y, st.d)) { me.x = at.x; me.y = at.y; me.face = at.f < 0 ? -1 : 1; }
@@ -809,7 +820,7 @@ function enterCity() {
   if (timersOn) return;
   timersOn = true;
   setInterval(hostTick, 250);
-  setInterval(() => { if (net.world && st.total !== savedTotal) { savedTotal = st.total; saveWorld(net.world, st); } saveAll(); }, 4000);
+  setInterval(() => { const sum = st.total + Object.values(st.rooms || {}).reduce((a, b) => a + b, 0); if (net.world && sum !== savedTotal) { savedTotal = sum; saveWorld(net.world, st); } saveAll(); }, 4000);
   addEventListener('pagehide', saveAll);
   setInterval(sendPos, 100);
   requestAnimationFrame(frame);
@@ -828,11 +839,19 @@ function hostTick() {
   handleEvents();
 }
 
-let lastPos = '', lastPosAt = 0;
+let lastPos = '', lastPosAt = 0, heldAt = 0, lastMe = 0;
+/** Which building this player is in and where, so others in the same one can see them. */
+function whereInside() {
+  const g = inside.g, game = inside.job ? 'room' : inside.m.game;
+  if (game === 'maze') return [inside.id, Math.round(g.px * 100), Math.round(g.py * 100)];
+  if (game === 'run') return [inside.id, Math.round(g.rx), 0];
+  return [inside.id, Math.round(inside.x * 1000), Math.round(inside.y * 1000)];
+}
 function sendPos() {
   if (!net || !net.peers.size) return;
-  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0), me.face, me.act];
+  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0), me.face, me.act, ...(inside ? whereInside() : [])];
   const k = m.join(), now = performance.now();
+  if (now - lastMe > 8000) { lastMe = now; net.broadcast('me', profileMsg()); } // names reach anyone who missed the first hello
   if (k === lastPos && now - lastPosAt < 1000) return;
   lastPos = k; lastPosAt = now;
   net.broadcast('pos', m);
@@ -868,7 +887,8 @@ function autoWalk() {
     if (d < bd) { bd = d; best = { x: j.px, y: j.py, job: j.id }; }
   }
   D.sites.forEach((s, k) => {
-    if (st.have[k] >= s.need) return;
+    // an unfinished building, or a finished one whose neighbor still needs help
+    if (st.have[k] >= s.need && (rooms()[roomKeyOf(st.d, k)] | 0) >= 6) return;
     const d = Math.hypot(me.x - s.x, me.y - s.y - 48);
     if (d < bd) { bd = d; best = { x: s.x, y: s.y + 48 }; }
   });
@@ -887,10 +907,11 @@ function doorAt() {
   }
   return null;
 }
-// How far this player has helped each neighbor: kept per city and per neighbor,
-// so a new city starts fresh and a building never inherits another one's progress.
-const rooms = () => (P.help[net.world.id] ||= {});
-const roomKey = id => { const [i, k] = id.split(':').map(Number); return `${id}:${missionFor(i, k).id}`; };
+// How far each neighbor has been helped is part of the city, so one player's
+// work inside a building counts for everyone. Keys name the neighbor too, so a
+// building never inherits another one's progress.
+const rooms = () => (st.rooms ||= {});
+const roomKey = id => { const [i, k] = id.split(':').map(Number); return roomKeyOf(i, k); };
 /** The fire or leak in building `id`, if there is one. Those are solved indoors. */
 const jobIn = id => (st.jobs || []).find(j => j.site != null && `${j.d}:${j.site}` === id);
 function enterBuilding(id) {
@@ -899,7 +920,7 @@ function enterBuilding(id) {
   const job = jobIn(id);
   let placed = Math.min(6, rooms()[roomKey(id)] | 0);
   if (m.game === 'maze' && placed < 6) placed = 0; // a maze starts over on each visit
-  inside = { id, m, placed, pop: 1, x: job ? 0.96 : 0.86, y: job ? 0.5 : 0.35, talk: 7, wig: null, near: null, job: job ? job.id : 0, out: new Set(), nearF: -1, g: G.newGame(m, id, placed) };
+  inside = { id, m, placed, fin: placed >= 6, pop: 1, x: job ? 0.96 : 0.86, y: job ? 0.5 : 0.35, talk: 7, wig: null, near: null, job: job ? job.id : 0, out: new Set(), nearF: -1, g: G.newGame(m, id, placed) };
   auto = null; held.clear(); stopTyping();
   if (job) greeted.add(job.id);
   npc(job ? `job${job.t}` : placed >= 6 ? `m_${m.id}_done` : `m_${m.id}`);
@@ -942,7 +963,7 @@ function finishPrompt(secs) {
   const ok = T.clean;
   const n = ok && bricks && P.crane > 0 ? 2 : 1;
   if (n === 2) P.crane--;
-  net.toHost('done', { site: inside ? -1 : T.site, clean: ok, boss, n, job });
+  net.toHost('done', { site: inside ? -1 : T.site, clean: ok, boss, n, job, room: inside && !job ? roomKey(inside.id) : undefined });
   lastSlip = !ok;
   if (!ok) {
     // Not delivered. The same prompt returns after the next one, until it is typed with no slips.
@@ -954,8 +975,7 @@ function finishPrompt(secs) {
   else sfx.load();
   if (!ok) { /* nothing delivered */ } else if (job && inside) inside.out.add(+key.split(':')[1]); // that fire is out
   else if (inside) {
-    inside.placed++; inside.pop = 0; rooms()[roomKey(inside.id)] = inside.placed; inside.talk = 0;
-    if (inside.placed >= 6) finishRoom();
+    inside.placed++; inside.pop = 0; inside.talk = 0;
   } else if (job) floatText(JOBS[T.jobType]?.fx || '👍', me.x, me.y - 100, '#2f7de1');
   else if (boss && st.boss) fx.push({ text: '🧱', x: me.x, y: me.y - 60, vx: (st.boss.x - me.x) * 2.5, vy: (st.boss.y - 80 - me.y + 60) * 2.5, life: 0.4, size: 26 });
   else floatText(n === 2 ? '+2 🧱' : '+1 🧱', me.x, me.y - 100, '#c8553d');
@@ -1018,6 +1038,8 @@ function updatePrompt() {
   me.act = c.job ? c.job.t : -1; curJob = c.job ? c.job.id : 0;
   paintDots(c);
   if (engaged) {
+    // a runaway (thief, pet, penguin) holds still for as long as someone is typing at it
+    if (c.job && JOBS[c.job.t].kind === 'run' && performance.now() - heldAt > 1000) { heldAt = performance.now(); net.toHost('hold', { job: c.job.id }); }
     if (choosing()) { if (!CH.opts && !inside.g.path.length) dealChoices(); return c.zone; }
     if (!T.p) {
       T.key = engaged; T.site = c.zone; T.jobType = c.job ? c.job.t : -1;
@@ -1061,6 +1083,7 @@ function updatePrompt() {
   else if (c.base) hint = 'Press Enter to start building here.';
   else if (doorId && jobIn(doorId)) hint = `${JOBS[jobIn(doorId).t].icon} Trouble inside! Press Enter to go in and help.`;
   else if (doorId) hint = rooms()[roomKey(doorId)] >= 6 ? '🚪 Press Enter to visit.' : '🚪 Press Enter to go in and help.';
+  else if (district(st.d).sites.every((s, k) => st.have[k] >= s.need)) hint = 'All built! Now go inside each ❗ building and help. Press Enter for the nearest one.';
   else hint = 'Walk to a glowing circle. Press Enter for the nearest one.';
   $('hint').textContent = hint;
   return c.zone;
@@ -1144,7 +1167,9 @@ function updateHud(now) {
   hudAt = now;
   const D = district(st.d);
   const left = D.sites.filter((s, k) => st.have[k] < s.need).length;
-  $('district').textContent = `🏙️ ${D.name}  ${6 - left}/6`;
+  const helped = D.sites.filter((x, k) => (rooms()[roomKeyOf(st.d, k)] | 0) >= 6).length;
+  $('district').textContent = `🏙️ ${D.name}   🧱 ${6 - left}/6   ⭐ ${helped}/6`;
+  $('district').title = 'Buildings built, and neighbors helped inside them. Both must reach 6 to open the next neighborhood.';
   const r = S.ROLES[myRole()];
   $('role').textContent = `Your job: ${r.icon} ${r.name}`;
   $('combo').style.width = Math.min(100, st.combo * 100) + '%';
@@ -1183,6 +1208,13 @@ function frame(now) {
     auto = null; inside.pop += dt; inside.talk = Math.max(0, inside.talk - dt);
     if (inside.wig && (inside.wig.t -= dt) <= 0) inside.wig = null;
     const walk = roomWalk(), g = inside.g;
+    // someone else in this building may have moved the work along
+    const shared = Math.min(6, rooms()[roomKey(inside.id)] | 0);
+    if (shared > inside.placed && (inside.m.game !== 'maze' || shared >= 6)) {
+      inside.placed = shared; inside.pop = 0;
+      if (choosing() && CH.opts) { CH.opts = null; $('prompt').innerHTML = ''; } // what is wanted next has changed
+    }
+    if (inside.placed >= 6 && !inside.fin) finishRoom();
     const ix = walk ? (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0) : 0, iy = walk ? (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0) : 0;
     inside.x = Math.min(0.97, Math.max(0.04, inside.x + ix * 0.4 * dt));
     inside.y = Math.min(1, Math.max(0, inside.y + iy * 1.3 * dt));
@@ -1190,7 +1222,7 @@ function frame(now) {
     inside.walk = !!(ix || iy);
     if (!walk && inside.m.game === 'maze' && g.path.length) { // walk the corridor to the next fork
       const tx = g.path[0] % G.MW, ty = (g.path[0] / G.MW) | 0, ax = tx - g.px, ay = ty - g.py, L = Math.hypot(ax, ay), s = 5 * dt;
-      if (L <= s) { g.px = tx; g.py = ty; g.path.shift(); if (!g.path.length && g.cell === g.mz.goal && inside.placed < 6) finishRoom(); }
+      if (L <= s) { g.px = tx; g.py = ty; g.path.shift(); if (!g.path.length && g.cell === g.mz.goal && inside.placed < 6) { inside.placed = 6; net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: roomKey(inside.id), all: true }); } }
       else { g.px += ax / L * s; g.py += ay / L * s; if (ax) me.face = ax > 0 ? 1 : -1; }
       inside.walk = true;
     } else if (!walk && inside.m.game === 'run') {
@@ -1247,8 +1279,10 @@ function frame(now) {
     updateKb(nextKey());
     const drawMe = (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: inside.walk }, x, y, now / 1000);
     const job = inside.job && st.jobs.find(j => j.id === inside.job);
-    if (job || inside.m.game !== 'furnish') G.drawGame(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, g: inside.g, placed: inside.placed, pop: inside.pop, opts: CH.opts ? CH.opts.map(o => o.id) : [], job, out: inside.out, nearF: inside.nearF, x: inside.x, y: inside.y, drawMe });
-    else drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe: (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: inside.walk }, x, y, now / 1000) });
+    const mates = liveOthers(now).filter(o => o.in === inside.id); // others in this same building
+    const drawMate = (o, x, y) => drawPlayer(ctx, { ...o, boat: false }, x, y, now / 1000);
+    if (job || inside.m.game !== 'furnish') G.drawGame(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, g: inside.g, placed: inside.placed, pop: inside.pop, opts: CH.opts ? CH.opts.map(o => o.id) : [], job, out: inside.out, nearF: inside.nearF, x: inside.x, y: inside.y, drawMe, mates, drawMate });
+    else drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe, mates, drawMate });
     updateHud(now);
     return;
   }
@@ -1372,4 +1406,4 @@ initStart();
 let resume = false;
 try { resume = !!sessionStorage.getItem('qq.resume'); sessionStorage.removeItem('qq.resume'); } catch { /* ignore */ }
 if (resume && P.name && P.placed) { $('start').classList.add('hidden'); startGame(); }
-window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, district, party }; // for debugging in the console
+window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, others, roomKeyOf, district, party }; // for debugging in the console

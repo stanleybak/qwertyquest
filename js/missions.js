@@ -72,7 +72,7 @@ export function nearSpot(room) {
 
 /**
  * Draw the inside of a building.
- * v: { w, h, ph (prompt panel height), t, m, placed, pop, x, y, near, talk, wig, drawMe(x, y) }
+ * v: { w, h, ph (prompt panel height), t, m, placed, pop, x, y, near, talk, wig, drawMe(x, y), mates, drawMate(o, x, y) }
  */
 export function drawInterior(ctx, v) {
   const { w, h, t, m } = v;
@@ -121,6 +121,7 @@ export function drawInterior(ctx, v) {
 
   const floorItems = spots.filter(s => s.kind === 'item' && s.i >= 3);
   floorItems.filter(s => s.y <= v.y).forEach(drawItem);
+  for (const o of v.mates || []) v.drawMate(o, fx(o.ix / 1000), fy(o.iy / 1000)); // others helping in this room
   v.drawMe(fx(v.x), fy(v.y));
   floorItems.filter(s => s.y > v.y).forEach(drawItem);
 
