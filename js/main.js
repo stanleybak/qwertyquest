@@ -7,7 +7,7 @@ import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-13j';
+const BUILD = '2026-11-14a';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -371,7 +371,7 @@ function handleEvents() {
     else if (ev.t === 'boss' || ev.t === 'job') { /* quiet */ }
     else if (ev.t === 'bossWin') { if (engaged === 'boss' || !busy()) { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); npc('bosswin'); } }
     else if (ev.t === 'bossFlee') { if (!busy()) { toast('The Typo Monster kicked a brick loose and wandered off.'); npc('bossflee'); } }
-    else if (ev.t === 'jobGone') { if (!busy() && ev.jt === 3) { toast('The brick thief got away this time.'); npc('job3gone'); } }
+    else if (ev.t === 'jobGone') { if ((!busy() || engaged?.startsWith('j')) && ev.jt === 3) { toast('The brick thief got away this time.'); npc('job3gone'); } }
     else if (ev.t === 'jobDone') {
       const names = (ev.who || []).map(id => (id === net.selfId ? me.name : others.get(id)?.name)).filter(Boolean);
       toast(`${JOBS[ev.jt].icon} ${names.join(' and ') || 'The crew'} ${JOBS[ev.jt].done}! The neighbors sent bricks to say thanks.`, 'gold');
@@ -491,6 +491,7 @@ function leaveBuilding() { inside = null; stopTyping(); Voice.stop(); }
 /** Put the keyboard down: no challenge runs until the player presses Enter again. */
 function stopTyping() {
   engaged = null; T.key = null; redo.length = 0; lastSlip = false; // each challenge is its own deck
+  $('panel').classList.remove('again');
   setPrompt(null, { prompt: $('prompt'), found: $('found') }, null);
 }
 const nearMe = (x, y) => Math.hypot(x - me.x, y - me.y) < 900;
@@ -524,7 +525,7 @@ function finishPrompt(secs) {
   lastSlip = !ok;
   if (!ok) {
     // Not delivered. The same prompt returns after the next one, until it is typed with no slips.
-    redo.push({ ...p, step: P.step }); if (redo.length > 4) redo.shift();
+    redo.push({ ...p, step: P.step }); // every slipped prompt stays owed; none is ever dropped
     redoGap = 1 + Math.floor(Math.random() * 3); // shuffled back into the deck: it returns in 1 to 3 prompts
     beep(300, 0.12, 'triangle', 0.06);
     if (!inside) floatText('↩ so close! it will come back', me.x, me.y - 100, '#8a5cf0');
@@ -599,6 +600,7 @@ function updatePrompt() {
       if (redo.length && (redoGap-- <= 0 || redo.length >= leftIn(c))) p = { ...redo.shift(), redo: true };
       else p = S.genPrompt(P, role, c.base === 'boss');
       setPrompt(p, { prompt: $('prompt'), found: $('found') }, finishPrompt);
+      $('panel').classList.toggle('again', !!p.redo);
       tip('type');
       $('hint').textContent = (p.redo ? '↩ Second chance: type this one with no slips to deliver it.'
         : lastSlip ? 'That one had a slip, so its dot turned purple and it will come back.'

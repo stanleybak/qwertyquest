@@ -131,7 +131,7 @@ export class Host {
     if (!types.length) return;
     const t = types[Math.floor(Math.random() * types.length)];
     const hp = (t === 0 ? 4 : 3) + this.players();
-    const j = { id: st.jobId++, t, hp, max: hp, left: 100, who: [] };
+    const j = { id: st.jobId++, t, hp, max: hp, left: 300, who: [] };
     if (t < 2) {
       const s = built[Math.floor(Math.random() * built.length)];
       Object.assign(j, { x: Math.round(s.x), y: Math.round(s.y), h: s.floors * 28, px: Math.round(s.x), py: Math.round(s.y + 48) });
@@ -259,7 +259,8 @@ export class Host {
           j.px = j.x = Math.round(j.x * 10) / 10; j.py = j.y = Math.round(j.y * 10) / 10;
         }
       }
-      if ((j.left -= dt) <= 0) { st.jobs.splice(i, 1); this.event('jobGone', { jt: j.t }); }
+      // Fires, leaks and kittens wait until someone solves them. Only the thief can get away, and only if nobody is chasing.
+      if (j.t === 3 && j.stun <= 0 && (j.left -= dt) <= 0) { st.jobs.splice(i, 1); this.event('jobGone', { jt: j.t }); }
     }
     if (st.total >= 3 && !st.boss && (st.jobIn -= dt) <= 0) {
       st.jobIn = 150; // a calm pace: a problem every few minutes, never two at once
