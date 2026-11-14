@@ -192,7 +192,7 @@ export class Host {
       const ids = st.order.length ? st.order : [from];
       const frac = ids.filter(id => this.clean[id]).length / ids.length;
       st.combo += 0.035 + 0.065 * frac;
-    } else st.combo = Math.max(0, st.combo - 0.12);
+    } else { st.combo = Math.max(0, st.combo - 0.12); return; } // a prompt with a slip delivers nothing
     if (st.combo >= 1) { st.combo = 0; this.event('gold'); this.sprinkle(1); }
     if (m.job) {
       const i = st.jobs.findIndex(j => j.id === m.job);

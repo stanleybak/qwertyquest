@@ -88,7 +88,7 @@ export function loadProfile() {
   p = Object.assign({
     name: '', color: 0, step: 0, placed: false, credits: 0, badRun: 0,
     lesson: { n: 0, hit: 0, miss: 0 }, keys: {}, streak: 0, bestStreak: 0,
-    stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, rooms: {}, tips: {}, shields: 0, crane: 0,
+    stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, rooms: {}, tips: {}, fresh: 12, shields: 0, crane: 0,
     wear: { hat: 'h0', tool: 't0', pet: 'p0', ride: 'r0' }, seen: ['h0', 't0', 'p0', 'r0'],
     day: { date: '', lessons: 0, promos: 0 }, pacing: true, guide: true, sound: true, vol: 0.7,
   }, p || {});
@@ -335,12 +335,12 @@ export function lessonPrompt(p) {
     if (stars === 3) { p.credits++; p.badRun = 0; }
     else if (acc < 0.8) {
       p.credits = Math.max(0, p.credits - 1);
-      if (++p.badRun >= 2 && p.step > 0) { p.step--; p.credits = 0; p.badRun = 0; res.demoted = true; }
+      if (++p.badRun >= 2 && p.step > 0) { p.step--; p.credits = 0; p.badRun = 0; p.fresh = 12; res.demoted = true; }
     } else p.badRun = 0;
   }
   if (p.credits >= CREDITS_TO_ADVANCE && p.step < MAX_STEP) {
     if (p.pacing && (p.day.promos | 0) >= MAX_PROMOS) { res.ready = !p.day.told; p.day.told = true; } // enough new things for one day
-    else { p.step++; p.credits = 0; p.day.promos = (p.day.promos | 0) + 1; res.promoted = true; }
+    else { p.step++; p.credits = 0; p.fresh = 12; p.day.promos = (p.day.promos | 0) + 1; res.promoted = true; }
   }
   return res;
 }

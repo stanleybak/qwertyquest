@@ -7,7 +7,7 @@ import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-13f';
+const BUILD = '2026-11-13g';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -24,6 +24,8 @@ const asked = new Set();
 let curJob = 0;
 let inside = null;             // { id, m, placed, pop } while visiting a building
 let doorId = null, nagAt = 0;
+const redo = [];               // prompts typed with a slip; each comes back until it is typed clean
+let redoGap = 0, lastSlip = false;
 let engaged = null;            // what the player chose to work on by pressing Enter, e.g. 's0:2', 'j5', 'boss'
 
 // ---------- sound ----------
@@ -117,6 +119,7 @@ const KB = [
 ];
 const KEY_PITCH = 34; // key width plus gap, in px (matches style.css)
 const keyEl = {}; // char -> { el, shift, right }
+let kbShown = null, kbNext = null;
 function buildKb() {
   const kb = $('kb'); kb.innerHTML = '';
   KB.forEach(([lo, up, fing], r) => {
@@ -141,7 +144,12 @@ function buildKb() {
 }
 function updateKb(next) {
   const kb = $('kb');
-  const show = P.guide && mode === 'game';
+  // The guide is a crutch, so it only appears when it helps: while keys are
+  // new, after a slip, or when the player has been stuck on a key for a while.
+  const show = P.guide && mode === 'game' && !!T.p
+    && (P.fresh > 0 || T.miss > 0 || performance.now() - Math.max(T.last, T.shown) > 4000);
+  if (show === kbShown && next === kbNext) return;
+  kbShown = show; kbNext = next;
   kb.classList.toggle('hidden', !show);
   if (!show) return;
   const known = P.step < S.STAGES.length ? S.cumKeys(P.step) : null;
@@ -159,10 +167,10 @@ function updateKb(next) {
 }
 
 // ---------- typing engine (shared by the warm-up and the game) ----------
-const T = { errs: new Set(), p: null, pos: 0, clean: true, last: 0, t0: 0, hits: 0, miss: 0, els: null, onDone: null, key: null };
+const T = { shown: 0, errs: new Set(), p: null, pos: 0, clean: true, last: 0, t0: 0, hits: 0, miss: 0, els: null, onDone: null, key: null };
 
 function setPrompt(p, els, onDone) {
-  T.p = p; T.pos = 0; T.clean = true; T.hits = 0; T.miss = 0; T.t0 = 0; T.errs = new Set(); T.els = els; T.onDone = onDone;
+  T.p = p; T.pos = 0; T.clean = true; T.hits = 0; T.miss = 0; T.t0 = 0; T.errs = new Set(); T.shown = performance.now(); T.els = els; T.onDone = onDone;
   if (!p) { els.prompt.innerHTML = ''; els.found.classList.add('hidden'); me.prog = 0; updateKb(null); return; }
   els.prompt.className = (p.spaced ? 'spaced' : p.text.length > 70 ? 'long' : '');
   els.prompt.innerHTML = '';
@@ -274,7 +282,7 @@ function nextProbe() {
 function endPlacement(step) {
   if (mode !== 'place') return;
   clearInterval(PL.timer);
-  P.step = step; P.placed = true; P.credits = 0;
+  P.step = step; P.placed = true; P.credits = 0; P.fresh = 12;
   S.saveProfile(P);
   setPrompt(null, { prompt: $('pprompt'), found: $('pfound') }, null);
   $('place').classList.add('hidden');
@@ -490,11 +498,20 @@ function finishPrompt(secs) {
   const key = T.key, boss = key === 'boss', p = T.p;
   const job = key.startsWith('j') ? +key.slice(1) : 0;
   const bricks = !job && !boss; // building work, outdoors or indoors
-  const n = bricks && P.crane > 0 ? 2 : 1;
+  const ok = T.clean;
+  const n = ok && bricks && P.crane > 0 ? 2 : 1;
   if (n === 2) P.crane--;
-  net.toHost('done', { site: inside ? -1 : T.site, clean: T.clean, boss, n, job });
-  sfx.load();
-  if (inside) {
+  net.toHost('done', { site: inside ? -1 : T.site, clean: ok, boss, n, job });
+  lastSlip = !ok;
+  if (!ok) {
+    // Not delivered. The same prompt returns after the next one, until it is typed with no slips.
+    redo.push({ ...p, step: P.step }); if (redo.length > 4) redo.shift();
+    redoGap = 1;
+    beep(300, 0.12, 'triangle', 0.06);
+    if (!inside) floatText('↩ so close! it will come back', me.x, me.y - 100, '#8a5cf0');
+  } else if (p.redo) { sfx.win(); if (!inside) floatText('✔ got it!', me.x, me.y - 124, '#2fae66', 22); }
+  else sfx.load();
+  if (!ok) { /* nothing delivered */ } else if (inside) {
     inside.placed++; inside.pop = 0; P.rooms[inside.id] = inside.placed; inside.talk = 0;
     if (inside.placed >= inside.m.items.length) {
       P.thanks++; P.crane += 3;
@@ -524,6 +541,7 @@ function finishPrompt(secs) {
   }
   for (const it of S.newUnlocks(P)) setTimeout(() => toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'), 1400);
   if (S.rankOf(P).i !== rankBefore) { setTimeout(() => toast(`${S.rankOf(P).icon} You are now a ${S.rankOf(P).name}!`, 'gold'), 2200); sendProfile(); }
+  if (P.fresh > 0) P.fresh--;
   S.saveProfile(P);
   T.p = null; // the next frame deals a fresh prompt while the player stays on the job
   me.prog = 0;
@@ -553,10 +571,15 @@ function updatePrompt() {
     if (!T.p) {
       T.key = engaged; T.site = c.zone; T.jobType = c.job ? c.job.t : -1;
       const role = c.base === 'boss' || c.job || inside ? 0 : myRole();
-      const p = S.genPrompt(P, role, c.base === 'boss');
+      while (redo.length && redo[0].step !== P.step) redo.shift(); // the level changed: let old retries go
+      let p;
+      if (redo.length && redoGap-- <= 0) p = { ...redo.shift(), redo: true };
+      else p = S.genPrompt(P, role, c.base === 'boss');
       setPrompt(p, { prompt: $('prompt'), found: $('found') }, finishPrompt);
       tip('type');
-      $('hint').textContent = (inside ? `Type to bring in the next thing for ${inside.m.who}.`
+      $('hint').textContent = (p.redo ? '↩ Second chance: type this one with no slips to deliver it.'
+        : lastSlip ? 'That one had a slip, so it will come back. No slips means it counts!'
+          : inside ? `Type to bring in the next thing for ${inside.m.who}.`
         : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
           : c.job ? JOBS[c.job.t].hint
             : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
@@ -710,6 +733,7 @@ function frame(now) {
   cam.x += (me.x - cam.x) * Math.min(1, dt * 6);
   cam.y += (me.y - 50 + $('panel').offsetHeight / 2 - cam.y) * Math.min(1, dt * 6);
   if (inside) {
+    updateKb(T.p ? T.p.text[T.pos] : null);
     drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe: (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: inside.walk }, x, y, now / 1000) });
     updateHud(now);
     return;
@@ -719,6 +743,7 @@ function frame(now) {
     door: doorId, roomDone: id => P.rooms[id] >= 6,
     zone, job: curJob, weak: st.boss ? S.weakKeys(P, 4) : [], bossHit, fx,
   });
+  updateKb(T.p ? T.p.text[T.pos] : null);
   updateHud(now);
 }
 
@@ -777,7 +802,7 @@ $('vol').value = P.vol;
 $('vol').oninput = e => { P.vol = +e.target.value; P.sound = P.vol > 0; S.saveProfile(P); };
 $('vol').onchange = e => { sfx.load(); e.target.blur(); };
 $('btnSound').onclick = () => { P.sound = !P.sound; if (P.sound && !P.vol) P.vol = 0.7; $('vol').value = P.sound ? P.vol : 0; S.saveProfile(P); if (!P.sound) window.speechSynthesis?.cancel(); };
-$('aStep').onchange = e => { P.step = +e.target.value; P.credits = 0; P.lesson = { n: 0, hit: 0, miss: 0 }; stopTyping(); S.saveProfile(P); };
+$('aStep').onchange = e => { P.step = +e.target.value; P.credits = 0; P.fresh = 12; P.lesson = { n: 0, hit: 0, miss: 0 }; stopTyping(); S.saveProfile(P); };
 $('aPacing').onchange = e => { P.pacing = e.target.checked; S.saveProfile(P); };
 $('aGuide').onchange = e => { P.guide = e.target.checked; S.saveProfile(P); };
 $('aDebug').onclick = () => {
