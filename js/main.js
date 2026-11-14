@@ -8,7 +8,7 @@ import { draw, drawPlayer, COLORS } from './render.js';
 import * as G from './games.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14c';
+const BUILD = '2026-11-14d';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -110,6 +110,31 @@ function confetti(x, y, n = 40) {
     const a = Math.random() * 7, v = 80 + Math.random() * 220;
     fx.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 160, g: 420, life: 0.8 + Math.random() * 0.8, color: COLORS[i % COLORS.length] });
   }
+}
+
+/** Fireworks the first time a brand-new key is pressed correctly. */
+function firstHit(ch) {
+  const k = P.keys[ch.toLowerCase()];
+  if (mode !== 'game' || !k || k.star || P.step >= S.STAGES.length || !S.STAGES[P.step].keys.includes(ch.toLowerCase())) return;
+  k.star = 1;
+  const r = $('panel').getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top - 40;
+  const add = (text, x, y, dx, dy, size, delay) => {
+    const el = document.createElement('span');
+    el.className = 'spark'; el.textContent = text;
+    el.style.cssText = `left:${x}px;top:${y}px;font-size:${size}px;--dx:${dx}px;--dy:${dy}px;animation-delay:${delay}ms`;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1500 + delay);
+  };
+  for (let burst = 0; burst < 3; burst++) { // three bursts, like fireworks
+    const bx = cx + (burst - 1) * 190, by = cy - 90 - (burst === 1 ? 70 : 0);
+    for (let i = 0; i < 12; i++) {
+      const a = i / 12 * Math.PI * 2, d = 90 + Math.random() * 70;
+      add(['⭐', '✨', '🌟'][i % 3], bx, by, Math.cos(a) * d, Math.sin(a) * d, 22 + Math.random() * 14, burst * 220);
+    }
+  }
+  add(`${ch.toUpperCase()} ⭐`, cx, cy - 60, 0, -70, 64, 0);
+  [784, 988, 1175, 1568].forEach((f, i) => beep(f, 0.18, 'triangle', 0.09, i * 0.09));
+  toast(`🎆 Your first ${ch.toUpperCase()}! You found a new key.`, 'gold');
 }
 
 // ---------- keyboard guide ----------
@@ -232,6 +257,7 @@ function typeChar(ch) {
     S.recordKey(P, want, true, T.pos > 0 ? now - T.last : 0);
     T.last = now; T.hits++; T.pos++;
     if (mode === 'game') S.lessonKey(P, true);
+    firstHit(want);
     sfx.key();
     if (T.pos >= T.p.text.length) { const cb = T.onDone; cb((now - T.t0) / 1000); return; }
     paintPrompt();
@@ -307,7 +333,7 @@ function typeChoice(ch) {
   const live = CH.opts.filter(o => o.text.startsWith(CH.buf));
   if (live.some(o => o.text.startsWith(next))) {
     S.recordKey(P, ch, true, CH.buf ? now - T.last : 0); S.lessonKey(P, true);
-    T.last = now; CH.buf = next; sfx.key();
+    T.last = now; CH.buf = next; sfx.key(); firstHit(ch);
     const hit = CH.opts.find(o => o.text === next);
     if (hit) chose(hit); else paintChoices();
     return;

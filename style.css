@@ -111,3 +111,5 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #partyKeys { display: flex; gap: 22px; justify-content: center; margin: 12px 0; }
 #partyKeys .cap { width: 76px; height: 76px; border-radius: 16px; background: #ffe08a; box-shadow: 0 6px 0 var(--accent); font: 800 2.4rem var(--mono); display: grid; place-items: center; margin: 0 auto 10px; animation: starpop .8s ease-out; }
 #partyKeys small { color: #6b6480; font-weight: 700; }
+.spark { position: fixed; z-index: 9; pointer-events: none; font-weight: 800; color: #ff8a3d; text-shadow: 0 2px 0 #fff; opacity: 0; animation: spark 1.3s ease-out forwards; }
+@keyframes spark { 0% { transform: translate(-50%, -50%) scale(.2); opacity: 1; } 70% { opacity: 1; } 100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1.15) rotate(140deg); opacity: 0; } }
