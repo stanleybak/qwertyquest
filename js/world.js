@@ -116,16 +116,27 @@ export function newState() {
     jobs: [], jobId: 1, jobIn: 150,
   };
 }
-const saveKey = room => 'qq.world.' + (room || 'solo');
-export function loadWorld(room) {
+// Cities this device has been part of: { id: { key, name, d, have, total, at } }.
+const SAVES = 'qq.worlds';
+export function loadWorlds() {
+  try { const o = JSON.parse(localStorage.getItem(SAVES)); if (o && typeof o === 'object') return o; } catch { /* nothing saved */ }
+  return {};
+}
+export function saveWorld(world, st) {
+  const all = loadWorlds();
+  all[world.id] = { key: world.key, name: world.name, d: st.d, have: st.have, total: st.total, at: Date.now() };
+  const ids = Object.keys(all).sort((a, b) => all[b].at - all[a].at);
+  for (const id of ids.slice(8)) delete all[id]; // keep the eight most recent
+  try { localStorage.setItem(SAVES, JSON.stringify(all)); } catch { /* ignore */ }
+}
+/** A city saved by an older version of the game, under the room it was played in. */
+export function legacyWorld(room) {
   try {
-    const s = JSON.parse(localStorage.getItem(saveKey(room)));
+    const k = 'qq.world.' + (room || 'solo'), s = JSON.parse(localStorage.getItem(k));
+    localStorage.removeItem(k);
     if (s && typeof s.d === 'number' && Array.isArray(s.have)) return s;
   } catch { /* nothing saved */ }
   return null;
-}
-export function saveWorld(room, st) {
-  try { localStorage.setItem(saveKey(room), JSON.stringify({ d: st.d, have: st.have, total: st.total })); } catch { /* ignore */ }
 }
 
 /** Host-side rules. `st` is the live state object; mutate it in place. */
@@ -235,12 +246,23 @@ export class Host {
     return this.st.items.splice(i, 1)[0];
   }
 
-  /** Take over a saved city if it is further along than this one. */
+  /**
+   * Another copy of this city turned up (a member's saved copy, or a host that
+   * carried on alone). Keep the best of both: the one that is further along,
+   * and for the same neighborhood, the taller of each building.
+   */
   offer(w) {
-    if (!w || typeof w.total !== 'number' || w.total <= this.st.total) return;
-    if (!Number.isInteger(w.d) || w.d < 0 || !Array.isArray(w.have) || w.have.length !== 6) return;
-    this.st.d = w.d; this.st.have = w.have.map(n => Math.max(0, n | 0)); this.st.total = w.total;
-    this.st.boss = null; this.st.items = []; this.st.jobs = [];
+    const st = this.st;
+    if (!w || typeof w.total !== 'number' || !Number.isInteger(w.d) || w.d < 0 || !Array.isArray(w.have) || w.have.length !== 6) return;
+    if (w.d < st.d) return;
+    const sites = district(w.d).sites, theirs = w.have.map((n, k) => Math.min(sites[k].need, Math.max(0, n | 0)));
+    if (w.d > st.d) { st.d = w.d; st.have = theirs; st.boss = null; st.items = []; st.jobs = []; }
+    else st.have = st.have.map((n, k) => Math.max(n, theirs[k]));
+    st.total = Math.max(st.total, w.total);
+    if (sites.every((s, k) => st.have[k] >= s.need)) { // together they had finished it
+      this.event('district', { d: st.d, name: district(st.d).name });
+      st.d++; st.have = [0, 0, 0, 0, 0, 0]; st.items = []; st.jobs = []; st.boss = null;
+    }
   }
 
   tick(dt) {

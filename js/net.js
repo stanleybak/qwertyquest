@@ -1,9 +1,12 @@
-// Networking: Trystero full mesh with one peer acting as host.
+// Networking: Trystero full mesh. Devices that find each other share a room,
+// and inside the room there can be several cities. Each city has one host.
 //
-// Game state goes client -> host -> everyone. Positions and profiles go
-// straight peer to peer because the mesh is already there. When the host
-// leaves, the next peer in the host's join order takes over from the last
-// state it received.
+// A device first only listens: every host announces its city along with its
+// state. To enter a city a device asks that host, who lets it in (at once if it
+// holds the city's key from an earlier visit, otherwise when a person there
+// says yes). Inside a city, game state goes client -> host -> everyone, and
+// positions and profiles go straight between members. When the host leaves,
+// the next member in the host's join order takes over.
 import { joinRoom } from '../vendor/trystero.js';
 
 const APP_ID = 'qwertyquest.github.io/v1';
@@ -64,24 +67,28 @@ async function reachedLocally(pc) {
 
 export class Net {
   /**
-   * handlers: onState(state), onBecomeHost(), onPeers(), onMsg(kind, data, from)
-   * getState(): the current state when this peer is host
+   * handlers: getState(), onState(state), onBecomeHost(), onPeers(id, joined), onMsg(kind, data, from),
+   *   onAsk(id, name), onWelcome(world), onDenied(), onWorlds()
    */
   constructor(handlers) {
     this.h = handlers;
     this.selfId = 'solo';
-    this.peers = new Set();
-    this.order = [];      // host first, then join order as the host saw it
-    this.hostId = null;   // null until we know
+    this.peers = new Set();   // everyone reachable in the room, in any city or none
+    this.order = [];          // members of this device's city: host first, then join order
+    this.hostId = null;
     this.acts = {};
     this.room = null;
     this.ready = false;
-    this.heard = 0;       // when the host last sent state
-    this.lanOnly = false; // only accept peers reached directly over the local network
+    this.heard = 0;           // when the host last sent state
+    this.world = null;        // { id, key, name } once this device is in a city
+    this.worlds = new Map();  // host id -> { id, name, host, n, d, at }: cities announced in the room
+    this.asking = null;       // { host, key, name, timer } while waiting to be let in
+    this.lanOnly = false;     // only accept peers reached directly over the local network
     this.okPeers = new Set();
     this.badPeers = new Set();
     this.checking = new Set();
   }
+  get isHost() { return !!this.world && this.hostId === this.selfId; }
 
   /** Decide whether a newly connected peer is really on this network, then let it in or shut it out. */
   async _vet(userId, tries = 0) {
@@ -97,17 +104,11 @@ export class Net {
       return;
     }
     this.checking.delete(userId);
-    if (verdict) { this.okPeers.add(userId); this._admit(userId); return; }
+    if (verdict) { this.okPeers.add(userId); this.peers.add(userId); return; }
     this.badPeers.add(userId);
     console.info('ignored a builder who is not on this network', userId.slice(0, 6));
     for (const pc of pcs) try { pc.close(); } catch { /* already gone */ }
   }
-  _admit(userId) {
-    this.peers.add(userId);
-    if (this.isHost && !this.order.includes(userId)) this.order.push(userId);
-    this.h.onPeers(userId, true);
-  }
-  get isHost() { return this.hostId === this.selfId; }
 
   /**
    * lanOnly: the room was found from the network address, so only peers on the
@@ -117,93 +118,153 @@ export class Net {
    */
   async join(roomId, { password = '', lanOnly = false } = {}) {
     this.lanOnly = lanOnly;
-    if (!roomId) { this._claim(); return; }
+    if (!roomId) return;
     try {
       this.room = joinRoom({ appId: APP_ID, identity: 'none', ...(password ? { password: password.toLowerCase().trim() } : {}), ...(lanOnly ? { rtcConfig: { iceServers: [] } } : {}) }, roomId);
       this.selfId = (await this.room.getSelf()).userId;
     } catch (e) {
       console.warn('network unavailable, playing solo', e);
-      this.room = null; this._claim(); return;
+      this.room = null; return;
     }
-    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer']) {
+    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'ask', 'welcome', 'deny']) {
       const a = this.acts[kind] = this.room.makeAction(kind);
       a.onMessage((data, ctx) => this._recv(kind, data, ctx.userId));
     }
     this.room.onUserJoin(({ userId }) => {
-      if (this.lanOnly) this._vet(userId); else this._admit(userId);
+      if (this.lanOnly) this._vet(userId); else this.peers.add(userId);
     }, { replay: true });
     this.room.onUserLeave(({ userId }) => {
       this.okPeers.delete(userId); // a peer that comes back is checked again
       this.peers.delete(userId);
-      this.order = this.order.filter(id => id !== userId);
-      this.h.onPeers(userId, false);
-      if (this.hostId === userId) this._elect();
+      this.worlds.delete(userId);
+      this._drop(userId);
     });
-    // Give an existing host a moment to speak before claiming the room.
-    setTimeout(() => { if (!this.hostId) this._elect(); }, 3500);
-    // A host that closes its laptop does not say goodbye, and WebRTC can take
-    // half a minute to notice. The state heartbeat is the faster signal.
     setInterval(() => {
-      if (this.isHost || !this.hostId || performance.now() - this.heard < 3500) return;
-      const gone = this.hostId;
-      this.peers.delete(gone);
-      this.order = this.order.filter(id => id !== gone);
-      this.h.onPeers(gone, false);
-      this._elect();
+      const now = performance.now();
+      for (const [id, w] of this.worlds) if (now - w.at > 3000) this.worlds.delete(id); // that city stopped announcing itself
+      // A host that closes its laptop does not say goodbye, and WebRTC can take
+      // half a minute to notice. The state heartbeat is the faster signal.
+      if (this.world && !this.isHost && this.hostId && !this.asking && now - this.heard > 3500) this._drop(this.hostId);
+      // Rejoining another host of this city, and that host vanished too: carry on from here.
+      if (this.world && this.asking && !this.worlds.has(this.asking.host) && now - this.heard > 6000) { this.cancelAsk(); this._elect(); }
+      this.h.onWorlds();
     }, 1000);
   }
 
-  /** Pick the host: first surviving entry of the known order, else lowest id. */
+  /** A member left this city (or went silent). */
+  _drop(id) {
+    if (!this.order.includes(id)) return;
+    this.order = this.order.filter(x => x !== id);
+    this.h.onPeers(id, false);
+    if (this.hostId === id) this._elect();
+  }
+  /** The host is gone: the next member in the known order takes over. */
   _elect() {
-    const alive = id => id === this.selfId || this.peers.has(id);
-    const known = this.order.filter(alive);
-    const next = known.length ? known[0] : [this.selfId, ...this.peers].sort()[0];
+    // If the same city is being kept alive by another host (the network split and healed), rejoin that one.
+    const other = [...this.worlds.values()].find(w => w.id === this.world.id && this.peers.has(w.host) && w.host !== this.selfId);
+    if (other) { this.ask(other.host, this.world.key, this.world.name); return; }
+    const next = this.order.find(id => id === this.selfId || this.peers.has(id)) ?? this.selfId;
     this.heard = performance.now();
     if (next === this.selfId) this._claim();
-    else this.hostId = next; // wait for their state; if they vanish, onUserLeave elects again
+    else this.hostId = next; // wait for their state; if they vanish too, the watchdog elects again
   }
   _claim() {
     this.hostId = this.selfId;
     this.order = [this.selfId, ...this.order.filter(id => id !== this.selfId && this.peers.has(id))];
-    for (const id of this.peers) if (!this.order.includes(id)) this.order.push(id);
     this.ready = true;
     this.h.onBecomeHost();
   }
+  _setOrder(order) {
+    const old = this.order;
+    this.order = order;
+    for (const id of order) if (id !== this.selfId && !old.includes(id)) this.h.onPeers(id, true);
+    for (const id of old) if (id !== this.selfId && !order.includes(id)) this.h.onPeers(id, false);
+  }
+
+  /** Start hosting a city (a new one, or one this device saved earlier). */
+  open(world) {
+    this.cancelAsk();
+    this.world = world;
+    this.order = [this.selfId];
+    this._claim();
+  }
+  /** Ask the host of a city to let this device in. `key` gets a past member in without anyone having to say yes. */
+  ask(hostId, key, name) {
+    this.cancelAsk();
+    const knock = () => this._send('ask', { key: key || '', name: this.h.myName() }, hostId);
+    this.asking = { host: hostId, name, timer: setInterval(knock, 2000) };
+    knock();
+  }
+  cancelAsk() { if (this.asking) clearInterval(this.asking.timer); this.asking = null; }
+  /** Host: let a device into the city. */
+  admit(id) {
+    if (!this.isHost || !this.peers.has(id)) return;
+    if (!this.order.includes(id)) { this.order.push(id); this.h.onPeers(id, true); }
+    this._send('welcome', this.world, id);
+  }
+  /** Host: turn a device away. */
+  deny(id) { this._send('deny', {}, id); }
 
   _recv(kind, data, from) {
     if (this.lanOnly && !this.okPeers.has(from)) { this._vet(from); return; } // not (yet) known to be on this network
-    if (!this.peers.has(from)) this._admit(from); // someone we had given up on is back
+    this.peers.add(from);
+    const now = performance.now();
     if (kind === 'state') {
+      if (!data || typeof data.w !== 'string') return;
+      this.worlds.set(from, { id: data.w, name: String(data.wn || 'A city').slice(0, 24), host: from, n: (data.order || []).length, d: data.d | 0, at: now });
+      if (!this.world || data.w !== this.world.id) return; // some other city
       if (this.isHost) {
-        // Two hosts met (both started alone). The bigger city wins, then the lower id.
-        const mine = this.h.getState();
-        const theirs = data.total > mine.total || (data.total === mine.total && from < this.selfId);
-        if (!theirs) return;
+        // The same city has two hosts (both carried on after losing each other).
+        // The lower id keeps it; the other folds in and offers what it built.
+        if (from < this.selfId && this.asking?.host !== from) this.ask(from, this.world.key, this.world.name);
+        return;
       }
+      if (from !== this.hostId && !this.order.includes(from)) return; // not from this city's members
       this.hostId = from;
-      this.heard = performance.now();
-      this.order = data.order || [from];
+      this.heard = now;
       this.ready = true;
+      this._setOrder(Array.isArray(data.order) ? data.order : [from]);
       this.h.onState(data);
       return;
     }
+    if (kind === 'ask') {
+      if (!this.isHost) return;
+      if (data && data.key && data.key === this.world.key) this.admit(from); // has been here before
+      else this.h.onAsk(from, String((data && data.name) || 'Someone').slice(0, 12));
+      return;
+    }
+    if (kind === 'welcome') {
+      if (this.asking?.host !== from || !data || typeof data.id !== 'string') return;
+      this.cancelAsk();
+      this.world = { id: data.id, key: String(data.key || ''), name: String(data.name || 'A city').slice(0, 24) };
+      this.hostId = from; this.heard = now;
+      this._setOrder([from, this.selfId]);
+      this.h.onWelcome(this.world);
+      return;
+    }
+    if (kind === 'deny') {
+      if (this.asking?.host === from) { this.cancelAsk(); this.h.onDenied(); }
+      return;
+    }
+    if (!this.world || !this.order.includes(from)) return; // only members of this city are heard
     if ((kind === 'done' || kind === 'grab' || kind === 'offer') && !this.isHost) return;
     this.h.onMsg(kind, data, from);
   }
 
   _send(kind, data, target) {
     const a = this.acts[kind];
-    if (!a || !this.peers.size) return;
-    const to = target ? [target] : this.lanOnly ? [...this.peers] : [undefined]; // strangers get nothing
-    for (const t of to) try { Promise.resolve(a.send(data, t ? { target: t } : undefined)).catch(() => {}); } catch { /* peer went away */ }
+    if (!a) return;
+    // State goes to the whole room, which is how cities are found. Everything else stays inside the city.
+    const to = target ? [target] : kind === 'state' ? [...this.peers] : this.order.filter(id => id !== this.selfId && this.peers.has(id));
+    for (const t of to) try { Promise.resolve(a.send(data, { target: t })).catch(() => {}); } catch { /* peer went away */ }
   }
-  /** To every peer. */
+  /** To every member (state: to everyone in the room). */
   broadcast(kind, data) { this._send(kind, data); }
   /** To one peer. */
   sendTo(id, kind, data) { if (this.peers.has(id)) this._send(kind, data, id); }
-  /** To the host; runs locally when this peer is the host. */
+  /** To the host; runs locally when this device is the host. */
   toHost(kind, data) {
-    if (this.isHost || !this.hostId) this.h.onMsg(kind, data, this.selfId);
-    else this.sendTo(this.hostId, kind, data);
+    if (this.isHost) this.h.onMsg(kind, data, this.selfId);
+    else if (this.hostId) this.sendTo(this.hostId, kind, data);
   }
 }

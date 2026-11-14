@@ -1,7 +1,7 @@
 // QwertyQuest: screens, input, the typing engine, and the frame loop.
 import * as S from './skill.js';
 import { Net, findRoom } from './net.js';
-import { Host, newState, loadWorld, saveWorld, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
+import { Host, newState, loadWorlds, saveWorld, legacyWorld, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
 import * as Voice from './voice.js';
 import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
@@ -9,7 +9,7 @@ import * as G from './games.js';
 import DATA from './content-data.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14f';
+const BUILD = '2026-11-14g';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -523,14 +523,34 @@ const handlers = {
     st = data; host = null; gotState = true;
     if (first) {
       lastEv = st.evId;
-      const saved = loadWorld(roomId);
-      if (saved && saved.total > st.total) net.toHost('offer', saved); // our remembered city is bigger: share it
+      // This device's own copy of the city may hold work the host has not seen: offer it, and the host keeps the best of both.
+      const mine = loadWorlds()[net.world.id];
+      if (mine && (mine.d > st.d || (mine.d === st.d && mine.have.some((n, k) => n > st.have[k])))) net.toHost('offer', mine);
+      if (mode === 'lobby') enterCity();
     }
     handleEvents();
   },
+  myName: () => P.name,
+  onWorlds() {
+    if (mode !== 'lobby') return;
+    if (net.asking && lobbyReady && !net.worlds.has(net.asking.host)) { net.cancelAsk(); lobbyNote = 'That city just closed.'; }
+    paintLobby();
+  },
+  onWelcome(world) {
+    // Let in. If this device was hosting its own copy of the same city, keep that copy to offer for merging.
+    if (host && mode === 'game') saveWorld(world, st);
+    host = null; gotState = false;
+    if (mode === 'lobby') { lobbyNote = ''; paintLobby(); }
+  },
+  onDenied() { lobbyNote = 'They can\'t let you in right now.'; paintLobby(); },
+  onAsk(id, name) {
+    if (asks.has(id)) return;
+    asks.set(id, name); paintAsks();
+    beep(880, 0.12, 'sine', 0.08); beep(1175, 0.16, 'sine', 0.08, 0.12);
+  },
   onPeers(id, joined) {
     if (joined) { other(id); net.sendTo(id, 'me', profileMsg()); }
-    else others.delete(id);
+    else { others.delete(id); if (asks.delete(id)) paintAsks(); }
     if (net.isHost) st.order = net.order;
   },
   onMsg(kind, data, from) {
@@ -583,28 +603,113 @@ function handleEvents() {
 }
 const myRole = () => (st.roles && st.roles[net?.selfId]) ?? 0;
 
-// ---------- the game ----------
+// ---------- finding a city ----------
+// After the start screen the device listens for cities on the network, then
+// either goes straight into the obvious one or shows a menu.
+const asks = new Map(); // host only: peer id -> name of someone waiting to be let in
+let lobbyNote = '', lobbyReady = false, timersOn = false;
+const rid = () => [...crypto.getRandomValues(new Uint8Array(9))].map(b => b.toString(36).padStart(2, '0')).join('');
+const openCities = () => [...net.worlds.values()].filter(w => net.peers.has(w.host));
+
 async function startGame() {
-  mode = 'game';
-  $('hud').classList.remove('hidden'); $('panel').classList.remove('hidden');
+  mode = 'lobby';
   buildKb();
   const q = new URLSearchParams(location.hash.slice(1)), code = q.get('room') || crewWord();
   const room = await findRoom(code, q.get('lan'));
   roomId = room.id; roomLabel = room.label;
-  const saved = loadWorld(roomId);
-  if (saved) Object.assign(st, { d: saved.d, have: saved.have, total: saved.total });
-  host = new Host(st); // provisional, until we learn whether someone else is hosting
-  const D = district(st.d);
-  me.x = D.cx + (Math.random() - 0.5) * 300; me.y = D.cy + 45; cam.x = me.x; cam.y = me.y;
   net = new Net(handlers);
   applyProfile(me, profileMsg());
+  $('lobby').classList.remove('hidden');
+  paintLobby();
   await net.join(roomId, { password: code, lanOnly: room.lan });
+  // a city saved by an older version becomes a named city
+  const old = legacyWorld(roomId);
+  if (old && !Object.keys(loadWorlds()).length) saveWorld({ id: rid(), key: rid(), name: `${P.name}'s city` }, old);
+  setTimeout(() => {
+    lobbyReady = true;
+    let menu = false;
+    try { menu = !!sessionStorage.getItem('qq.menu'); sessionStorage.removeItem('qq.menu'); } catch { /* ignore */ }
+    const saved = loadWorlds(), ids = Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at), open = openCities();
+    const known = open.find(w => saved[w.id]);
+    if (mode !== 'lobby' || net.asking) return;
+    if (!menu && known) return joinCity(known);                  // our own city is already open here: walk right in
+    if (!menu && !open.length && ids.length <= 1) return hostCity(ids[0]); // nothing to choose between
+    paintLobby();
+  }, net.room ? 3500 : 0);
+}
+function joinCity(w) {
+  lobbyNote = '';
+  net.ask(w.host, loadWorlds()[w.id]?.key || '', w.name);
+  paintLobby();
+}
+/** Host a saved city, or a brand new one when `id` is empty. */
+function hostCity(id) {
+  const saved = id && loadWorlds()[id];
+  const world = saved ? { id, key: saved.key, name: saved.name } : { id: rid(), key: rid(), name: `${P.name}'s city` };
+  st = newState();
+  if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total });
+  host = new Host(st);
+  net.open(world);
+  enterCity();
+}
+function paintLobby() {
+  const el = $('lobbyBody'); el.innerHTML = '';
+  const add = (tag, text, cls) => { const x = document.createElement(tag); x.textContent = text; if (cls) x.className = cls; el.appendChild(x); return x; };
+  if (net.asking || (net.world && mode === 'lobby')) {
+    add('h2', `🚪 Knock, knock!`);
+    add('p', `Asking to join ${net.asking ? net.asking.name : net.world.name}…`, 'sub');
+    add('p', 'Someone there needs to press ✔ Let in.', 'small');
+    if (net.asking) add('button', 'Never mind', '').onclick = () => { net.cancelAsk(); paintLobby(); };
+    return;
+  }
+  if (!lobbyReady) { add('h2', '🔎 Looking for cities…'); add('p', 'Checking who is building on your Wi-Fi.', 'sub'); return; }
+  add('h2', '🏙️ Pick a city');
+  if (lobbyNote) add('p', lobbyNote, 'sub');
+  const saved = loadWorlds(), open = openCities();
+  for (const w of open) {
+    const b = add('button', '', 'city');
+    b.append(`🏙️ ${w.name}`, Object.assign(document.createElement('small'), { textContent: `${w.n} building there now · ask to join` }));
+    b.onclick = () => joinCity(w);
+  }
+  for (const id of Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at).slice(0, 4)) {
+    if (open.some(w => w.id === id)) continue;
+    const b = add('button', '', 'city');
+    b.append(`▶ ${saved[id].name}`, Object.assign(document.createElement('small'), { textContent: `saved here · ${saved[id].d} neighborhood${saved[id].d === 1 ? '' : 's'} finished` }));
+    b.onclick = () => hostCity(id);
+  }
+  add('button', '➕ Start a brand new city', 'city').onclick = () => hostCity('');
+}
+/** Host: people waiting to be let in, shown under the top-right buttons. */
+function paintAsks() {
+  const el = $('asks'); el.innerHTML = '';
+  for (const [id, name] of asks) {
+    const card = document.createElement('div'); card.className = 'ask';
+    const t = document.createElement('div'); t.textContent = `🙋 ${name} wants to join`;
+    const yes = document.createElement('button'); yes.textContent = '✔ Let in'; yes.className = 'yes';
+    const no = document.createElement('button'); no.textContent = '✖ Not now';
+    yes.onclick = () => { net.admit(id); asks.delete(id); paintAsks(); toast(`${name} joined your city.`); };
+    no.onclick = () => { net.deny(id); asks.delete(id); paintAsks(); };
+    card.append(t, yes, no); el.appendChild(card);
+  }
+}
+
+// ---------- the game ----------
+function enterCity() {
+  mode = 'game';
+  $('lobby').classList.add('hidden');
+  $('hud').classList.remove('hidden'); $('panel').classList.remove('hidden');
+  saveWorld(net.world, st); savedTotal = st.total; // remember this city (and its key) from the first moment
+  const D = district(st.d);
+  me.x = D.cx + (Math.random() - 0.5) * 300; me.y = D.cy + 45; cam.x = me.x; cam.y = me.y;
   if (!roomId) toast('Could not reach the network. Playing solo for now.');
+  else toast(`Welcome to ${net.world.name}!`, 'gold');
+  if (timersOn) return;
+  timersOn = true;
   setInterval(hostTick, 250);
-  setInterval(() => { if (st.total !== savedTotal) { savedTotal = st.total; saveWorld(roomId, st); } S.saveProfile(P); }, 4000);
+  setInterval(() => { if (net.world && st.total !== savedTotal) { savedTotal = st.total; saveWorld(net.world, st); } S.saveProfile(P); }, 4000);
   setInterval(sendPos, 100);
   requestAnimationFrame(frame);
-  toast('Arrow keys to walk. Press Enter at a glowing circle to start typing.');
+  setTimeout(() => toast('Arrow keys to walk. Press Enter at a glowing circle to start typing.'), 2500);
   if (!P.tips.hello) { P.tips.hello = 1; npc('hello', 'walk'); }
 }
 
@@ -612,10 +717,10 @@ let lastTick = performance.now();
 function hostTick() {
   const now = performance.now(), dt = Math.min(2, (now - lastTick) / 1000);
   lastTick = now;
-  if (!host || !(net.isHost || !net.hostId)) return;
-  if (net.isHost) st.order = net.order; else st.order = [net.selfId];
+  if (!host || !net.isHost) return;
+  st.order = net.order; st.w = net.world.id; st.wn = net.world.name;
   host.tick(dt);
-  if (net.isHost) net.broadcast('state', st);
+  net.broadcast('state', st);
   handleEvents();
 }
 
@@ -910,7 +1015,7 @@ const liveOthers = now => [...others.values()].filter(o => o.seen && now - o.at 
 function debugInfo() {
   const now = performance.now(), short = id => (id || '').slice(0, 6);
   return JSON.stringify({
-    build: BUILD, time: new Date().toISOString(), room: roomLabel, roomId: short(roomId),
+    build: BUILD, time: new Date().toISOString(), room: roomLabel, roomId: short(roomId), city: net?.world?.name, citiesSeen: [...(net?.worlds.values() || [])].map(w => w.name),
     self: short(net?.selfId), host: short(net?.hostId), isHost: net?.isHost, ready: net?.ready,
     order: (net?.order || []).map(short),
     peers: [...(net?.peers || [])].map(id => {
@@ -943,7 +1048,7 @@ function updateHud(now) {
   $('powers').textContent = pw; $('powers').classList.toggle('hidden', !pw);
   const crew = liveOthers(now).length;
   $('crew').textContent = !net.ready ? '🔎' : `👷 ${1 + crew}`;
-  $('crew').title = `Builders in ${roomLabel}` + (net.isHost && crew ? ' (this device is keeping the city)' : '');
+  $('crew').title = `Builders in ${net.world?.name}` + (net.isHost && crew ? ' (this device is keeping the city)' : '');
   $('comboBox').classList.toggle('hidden', !crew); // the team meter only matters with a team
 }
 
@@ -1051,7 +1156,7 @@ function frame(now) {
 // ---------- input ----------
 addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
-  if (mode === 'start' || (mode === 'game' && document.querySelector('.screen:not(.hidden)'))) return;
+  if (mode === 'start' || mode === 'lobby' || (mode === 'game' && document.querySelector('.screen:not(.hidden)'))) return;
   const ch = charOf(e);
   if (mode === 'place') { if (ch) { e.preventDefault(); typeChar(ch); } return; }
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }
@@ -1147,6 +1252,7 @@ $('aMake').onclick = () => { // four random words: easy to read out over the pho
   const ws = DATA.words.flat().filter(w => w.length >= 4 && w.length <= 6), r = crypto.getRandomValues(new Uint32Array(4));
   $('aRoom').value = [...r].map(n => ws[n % ws.length]).join(' ');
 };
+$('aLeave').onclick = () => { try { sessionStorage.setItem('qq.menu', '1'); } catch { /* ignore */ } location.reload(); };
 $('aRetest').onclick = () => { P.placed = false; S.saveProfile(P); location.reload(); };
 $('aReset').onclick = () => { if (confirm('Erase this player\'s progress on this device?')) { S.resetProfile(); location.reload(); } };
 document.querySelectorAll('.screen .close').forEach(b => { b.onclick = () => { b.closest('.screen').classList.add('hidden'); b.blur(); }; });

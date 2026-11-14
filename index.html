@@ -35,6 +35,7 @@
 </div>
 
 <div id="toasts"></div>
+<div id="asks"></div>
 
 <div id="panel" class="hidden">
   <div id="dots" title="What is left in this challenge"></div>
@@ -56,6 +57,10 @@
     <button id="go" class="primary">Start building ▶</button>
     <p id="netnote" class="small">Everyone on your Wi-Fi builds the same city.</p>
   </div>
+</div>
+
+<div id="lobby" class="screen hidden">
+  <div class="card" id="lobbyBody"></div>
 </div>
 
 <div id="place" class="screen hidden">
@@ -112,6 +117,7 @@
     <p class="small">Anyone who has the code can join, so do not use a single easy word. <button id="aMake" class="link" type="button">Make a four-word code for me</button></p>
     <div id="aStats" class="small"></div>
     <div class="rowbtn">
+      <button id="aLeave">Leave this city (pick another or start a new one)</button>
       <button id="aJoin">Join room</button>
       <button id="aRetest">Redo the warm-up</button>
       <button id="aReset" class="danger">Erase this player</button>
