@@ -6,7 +6,8 @@ export const STAGES = DATA.stages;
 const NS = STAGES.length;            // key stages (steps 0..NS-1)
 export const MAX_STEP = NS + 3;      // then: capitals, sentences, fluency, mastery
 export const LESSON_LEN = 12;        // prompts per lesson
-export const SHIFT_LESSONS = 6;      // lessons in one daily shift (about 15 minutes)
+export const SHIFT_LESSONS = 9;      // lessons in one daily shift (about 20 minutes)
+export const MAX_PROMOS = 3;         // new steps a player can unlock in one day
 export const CREDITS_TO_ADVANCE = 3; // lessons at 95%+ needed to unlock the next step
 
 export const ROLES = [
@@ -27,6 +28,13 @@ export function cumKeys(step) {
   return cumKeysCache[s];
 }
 const wordsCache = [];
+const lowCache = [];
+/** Real phrases typeable with the keys learned by `step`. */
+function phrasesUpTo(step) {
+  const s = Math.min(step, NS - 1);
+  if (!lowCache[s]) lowCache[s] = DATA.low.slice(0, s + 1).flat();
+  return lowCache[s];
+}
 function wordsUpTo(step) {
   const s = Math.min(step, NS - 1);
   if (!wordsCache[s]) wordsCache[s] = DATA.words.slice(0, s + 1).flat();
@@ -82,13 +90,17 @@ export function loadProfile() {
     lesson: { n: 0, hit: 0, miss: 0 }, keys: {}, streak: 0, bestStreak: 0,
     stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, rooms: {}, tips: {}, shields: 0, crane: 0,
     wear: { hat: 'h0', tool: 't0', pet: 'p0', ride: 'r0' }, seen: ['h0', 't0', 'p0', 'r0'],
-    day: { date: '', lessons: 0, promoted: false }, pacing: true, guide: true, sound: true, vol: 0.7,
+    day: { date: '', lessons: 0, promos: 0 }, pacing: true, guide: true, sound: true, vol: 0.7,
   }, p || {});
   rollDay(p);
   return p;
 }
 export function rollDay(p) {
-  if (p.day.date !== today()) { p.day = { date: today(), lessons: 0, promoted: false }; p.days++; }
+  if (p.day.date !== today()) {
+    p.day = { date: today(), lessons: 0, promos: 0 }; p.days++;
+    // a night away loosens every key a little, so each one comes back for review sooner
+    for (const k of Object.values(p.keys)) if (k.iv) { k.iv = Math.max(3, k.iv / 2); k.due = Math.min(k.due, p.loads + k.iv); }
+  }
 }
 export function saveProfile(p) {
   try { localStorage.setItem(KEY, JSON.stringify(p)); } catch { /* storage full or blocked */ }
@@ -112,6 +124,24 @@ export function recordKey(p, ch, ok, ms) {
   else if (ms > 0 && ms < 4000) k.ms = k.ms ? k.ms * 0.8 + ms * 0.2 : ms;
   if (k.n > 60) { k.n *= 0.5; k.e *= 0.5; } // old mistakes fade
 }
+/**
+ * Spaced review, per key. After each prompt, a key typed cleanly waits twice
+ * as many prompts before it is due again; a key that was missed is due again
+ * almost at once. Due keys pull the next prompts toward themselves.
+ */
+export function reviewPrompt(p, text, missed) {
+  for (const ch of new Set(text)) {
+    const k = p.keys[keyId(ch)];
+    if (!k) continue;
+    k.iv = missed.has(keyId(ch)) ? 3 : Math.min(600, Math.max(4, (k.iv || 4) * 2));
+    k.due = p.loads + k.iv;
+  }
+}
+/** Learned keys that are due for review, most overdue first. */
+export function dueKeys(p) {
+  return Object.entries(p.keys).filter(([c, k]) => c.length === 1 && k.due !== undefined && k.due <= p.loads)
+    .sort((a, b) => a[1].due - b[1].due).map(x => x[0]);
+}
 function medianMs(p) {
   const v = Object.values(p.keys).map(k => k.ms).filter(Boolean).sort((a, b) => a - b);
   return v.length ? v[v.length >> 1] : 400;
@@ -121,7 +151,8 @@ function weakness(p, ch, med) {
   if (!k) return 0.35; // untested keys deserve a look
   const err = (k.e + 0.5) / (k.n + 3);
   const slow = k.ms ? Math.min(2, Math.max(0, k.ms / med - 1)) : 0.2;
-  return err * 3 + slow * 0.6;
+  const due = k.due !== undefined && k.due <= p.loads ? 0.8 : 0;
+  return err * 3 + slow * 0.6 + due;
 }
 /** The player's weakest keys among those they have learned. */
 export function weakKeys(p, n = 4) {
@@ -205,8 +236,12 @@ export function genPrompt(p, role = 0, boss = false) {
   const step = p.step;
   const fresh = step < NS ? STAGES[step].keys : '';
   if (step < 5) {
-    const ws = wordsUpTo(step);
-    if (ws.length > 8 && Math.random() < 0.4 && !boss) {
+    const ws = wordsUpTo(step), ph = phrasesUpTo(step);
+    if (ph.length > 8 && role === 1 && Math.random() < 0.6 && !boss) {
+      const t = pickWeak(p, ph, { boost: fresh });
+      return { text: t, say: t };
+    }
+    if (ws.length > 8 && Math.random() < 0.5 && !boss) {
       const w = pickWeak(p, ws, { boost: fresh });
       if (role === 2 && w.length >= 3) return { ...inspect(w, true), say: w };
       return { text: w, say: w };
@@ -225,8 +260,16 @@ export function genPrompt(p, role = 0, boss = false) {
       return { ...inspect(w, true), say: w };
     }
     if (role === 0 || boss) {
+      const short = phrasesUpTo(step).filter(x => x.length <= 12);
+      if (!boss && short.length >= 6 && Math.random() < 0.35) { const t = pickWeak(p, short, o.filter ? { boost: fresh } : o); return { text: t, say: t }; }
       const w = pickWeak(p, ws, { ...o, filter: x => x.length <= (boss ? 9 : 5) && (!o.filter || o.filter(x)) });
       return { text: w, say: w };
+    }
+    // builders get real phrases and sentences whenever the keys allow it
+    const ph = phrasesUpTo(step);
+    if (ph.length >= 10 && Math.random() < 0.8) {
+      const t = pickWeak(p, ph, { boost: fresh, tries: 12, filter: useFresh && DATA.low[step].length >= 6 ? o.filter : null });
+      return { text: t, say: t };
     }
     const a = pickWeak(p, ws, o), b = pickWeak(p, ws, o);
     const keys = cumKeys(step);
@@ -296,8 +339,8 @@ export function lessonPrompt(p) {
     } else p.badRun = 0;
   }
   if (p.credits >= CREDITS_TO_ADVANCE && p.step < MAX_STEP) {
-    if (p.pacing && p.day.promoted) { res.ready = !p.day.told; p.day.told = true; } // one promotion a day: sleep on it
-    else { p.step++; p.credits = 0; p.day.promoted = true; res.promoted = true; }
+    if (p.pacing && (p.day.promos | 0) >= MAX_PROMOS) { res.ready = !p.day.told; p.day.told = true; } // enough new things for one day
+    else { p.step++; p.credits = 0; p.day.promos = (p.day.promos | 0) + 1; res.promoted = true; }
   }
   return res;
 }

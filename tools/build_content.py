@@ -106,6 +106,71 @@ sunny tomato tunnel violin volcano wizard keyboard table truck question
 dolphin green when quiz
 """.split()
 
+# Real lowercase phrases and sentences. The build sorts each one into the
+# earliest key stage that can type it, so early learners get real language
+# instead of letter soup as soon as their keys allow it.
+LOW = """
+a sad lad|dad falls|a lad asks dad|all fall|ask a lass|a flask falls|dad adds salad|as a lad|a salad|sad dad
+dad asks|all lads fall|a lass asks|add a salad|a lad falls|ask dad|dad asks a lad|all ask dad|a sad lass
+a glad lad|dad has a flag|a lass has a flask|a half glass|dad had hash|glad dad|a flag sags|half a salad
+a hall flag|dad shall ask|a glass flask|all had salad|a lad had a flash|a gal has a flag|dad has gas
+a lad has a sash|shall dad dash|a lass had half|flags flash|a glad gal|dad had a gash|a hall has a flag
+he is glad|she likes fish|i feel glad|she sees a field|he likes jade|i like eggs|a kid slid|he fed a seal
+she has ideas|dad feeds a seal|i hide a shell|she said hi|kids like sleds|a safe lake|he is a kid|she is ill
+a leaf fell|all kids giggle|i see a hill|she hikes a hill|eagles like fish|i like salad|he hid a key
+she sells sea shells|a kid has a sled|i slid safe|he feels like a fish|she led a hike|life is like a lake
+a field of eggs|i did a flip|he skis a hill|she feeds geese|geese like a lake|he is as high as a hill
+her hair is red|a girl likes a rug|he rides a sled|she drags a ladder|a shark is large|girls hear gulls
+he uses a ruler|her dress is dark|a deer fears fire|i rush here|i like fresh fries|she is sure|her jar is full
+he heard a gull|a red rug|i hug her|she led a huge herd|use glue here|a dark fir|real fur is rare
+her girl rides a sled|a large raged fire|he fried eggs|sugar is like a jewel|a rider fell|hurry here
+she shares a raft|his ear is red|a fair deal|she uses a fake ruler|i fear sharks
+the dog is hot|she got a red hat|a toad sat there|this is the door|look at that kite|he took the food
+the goat ate oats|i hold the rope|that is a tall tree|little otters dig holes|the forest is so dark
+she rode a horse to the lake|the stars are out|look at the stars|it is a good idea|dad told a joke
+he lost a shoe|the ghost is just a joke|are those hers|the road is so rough|take a seat|i eat a lot of fruit
+the roof is red|the tiger is tired|too hot to hike|let us go fast|the gate is shut|a frog sat still
+get out of the lake|i forgot to eat|he is still at the house|tell us the rest|the fish too is fast
+the door is tall|sit to the left|a light is just out there|the dirt road is long|go get the ladder
+the hills are so far off|i got a letter to dad|feet first|let the horse rest|three or four eggs
+why is the sky so high|you were right|we walk to the lake|the owl was wise|yes he will|they saw a yellow kite
+what a great day|you say it your way|we would like to stay|today is a good day|wash your hair|we share toys
+who ate the last egg|they stay with us|show us your work|how are you today|you write a story
+we drew a yellow flower|where is the towel|i wish i were taller|the wolf has gray fur|your key is here
+we saw two eagles fly|say yes if you like|the water was too high|few of us like it wet|way to go
+we will try our best|what do you say|they followed the road west|your sister is with us|a year ago today
+please keep quiet|put the puppy to sleep|a squirrel ate the pear|the party is at four|pass the pepper please
+people play sports|a quiet quail|help the pup up|pour the water|she is proud of you|happy people share
+pigs like apples|we slept at the lake|the proud ship sails|press the square key|the squid is purple
+quiet as a ghost|super idea|a path up the hill|the top step is slippery|stop for a sip of tea
+type the letters slowly|keep your fingers ready|a pile of paper plates|quite a party|a pair of quails
+the play was a hit|sleep is good for people|put your hat on top|your typing is quite good|a deep quiet pool
+the moon is in the sky|my mom makes me smile|many men ran home|one more time|i am not mad|the monkey is funny
+rain is on the way|nine and one make ten|we found money|the mouse ran under the mat|sing me a song
+a small snake|queen and king|the sun warms the sand|now it is night|i want one more turn|hold my hand
+summer rain is warm|then we went home|no one is home|my friend is kind|the moon is not a planet
+a home needs many hands|men and women make things|morning is my time to run|the storm is done now
+i know my numbers|rain means the garden is happy|a kitten is on the fence|open the window|turn around
+the answer is nine|more and more snow|my name is not known|a plan for the afternoon|i am one of many
+i love ice cream|the cat can climb|seven cows came over|we drive a car|every voice counts|a cave is cold
+cut the cake once|clouds cover the city|each child has a chance|the van moves very slow|she can dance
+a clever chicken|i have five coins|we visit the ocean|chairs are covered in velvet|i can hear music
+the candy is very sweet|check the clock|can you come over|a circle has no corners|we love our school
+never give up|the river curves south|voices carry over water|the coach drives the van|a cup of cocoa
+bring the blue ball|big bears, small bugs|a baby bird|the bus is back|bake bread, not bricks
+buy a book, read a book|the robot beeps|rabbits, bunnies, and bears|my brother has a bike
+bubbles in the bath|both boats are brown|a banana, a berry, and a bun|the bridge is being built
+be brave, be bold|a bee is by the barn|blue, black, and brown|bring a blanket to bed|the best job is building
+bricks, boards, and beams|a better building, brick by brick|rub a dub dub|above and below
+the fox is in the box.|fix the taxi.|wax the next box.|i am six.|relax, it is fine.|the exit is next.
+mix the wax.|an extra box.|six foxes relax.|the taxi is next.|explore the next exit.|expect extra bricks.
+exactly six boxes.|fix it, mix it, box it.|the ox is next to the box.|a text is an extra.
+the zebra is in the zoo.|a lazy, fuzzy puzzle.|pizza is the prize.|zip it up.|a dizzy bee buzzes.
+the wizard zaps the maze.|yes/no|and/or|a frozen breeze.|zero pizza is a crazy prize.|buzz, zip, zap.
+the lazy zebra dozes.|a dozen cozy zoo animals.|his/her|zoom to the zoo.|the quiz is a breeze.
+"""
+LOW = [x.strip() for x in LOW.replace("\n", "|").split("|") if x.strip()]
+
 # Tier 3: capitals and basic punctuation.
 NAMES = """Sam Mia Leo Zoe Max Ava Ben Lily Jack Emma Noah Ruby Finn Ella Owen
 Nora Luke Maya Dan Ivy""".split()
@@ -122,6 +187,20 @@ PHRASES = [
     "Red, green, and blue.", "Time for lunch!", "Do you like snow?",
     "A panda eats.", "The rocket is fast.", "Wizards love magic.",
     "Is the door open?", "Dragons are big!", "Help me build.",
+    "Fern is the foreman.", "The fire is out!", "Thank you, builder!", "Where did the thief go?",
+    "Grandma loves her new sofa.", "The bakery smells so good.", "Shh, this is a library.",
+    "Did you feed the kitten?", "Our city is growing fast!", "Can you fix the pipe?",
+    "Welcome to Qwerty Quay.", "Bring bricks, please.", "My hat is yellow.", "Whose turn is it?",
+    "First, wash your hands.", "Wait, I forgot my hammer!", "The bridge is finished.",
+    "Dr. Fizz has a new lab.", "Captain Tide sails at dawn.", "What time is it?",
+    "It is half past ten.", "Rain, rain, go away.", "I can type my name.", "Let's build a tower!",
+    "Don't look at the keys.", "Sit up tall, feet flat.", "Slow is smooth.", "Nice work, team!",
+    "Happy birthday to you!", "Is this your pencil?", "No, it is hers.", "Yes, it is mine.",
+    "Please pass the salt.", "Good night, sleep tight.", "Why is the sky blue?", "Because I said so!",
+    "The moon is bright tonight.", "Hurry, the bus is here!", "Ouch, that was loud.",
+    "Two plus two is four.", "A is for apple.", "Z is for zebra.", "Mom, Dad, and me.",
+    "We won the game!", "Who let the dogs out?", "Up, up, and away!", "One fish, two fish.",
+    "Hello, my name is Pip.", "Ms. Paws loves pets.", "Mr. Quill reads a lot.",
 ]
 
 # Tier 4: real sentences with numbers. Keep every one of these true.
@@ -176,6 +255,41 @@ FACTS = [
     "Half of 100 is 50, and half of 50 is 25.",
     "Bats are the only mammals that can truly fly.",
     "A rainbow has 7 colors: red, orange, yellow, green, blue, indigo, and violet.",
+    "Octopuses have blue blood.",
+    "The Sahara is the largest hot desert on Earth.",
+    "A year on Mars lasts 687 Earth days.",
+    "The human heart has 4 chambers.",
+    "There are 12 months and 4 seasons in a year.",
+    "Sea otters hold hands while they sleep.",
+    "A cow's stomach has 4 parts.",
+    "The Great Wall of China is more than 13,000 miles long.",
+    "Venus is the hottest planet in our solar system.",
+    "An hour has 3,600 seconds.",
+    "Starfish have no brain.",
+    "A hexagon has 6 sides and an octagon has 8.",
+    "The Amazon rainforest is in South America.",
+    "The Sun is a star about 93 million miles away.",
+    "Frogs can drink water through their skin.",
+    "Caterpillars turn into butterflies or moths.",
+    "The cheetah is the fastest land animal.",
+    "Pluto was called a planet until 2006.",
+    "A decade is 10 years, and a millennium is 1,000 years.",
+    "Neptune takes about 165 Earth years to go around the Sun.",
+    "Whales are mammals, so they breathe air.",
+    "The Wright brothers first flew in 1903.",
+    "Diamonds are made of carbon.",
+    "An ostrich can run faster than 40 miles per hour.",
+    "Earth has 1 moon, but Jupiter has more than 90.",
+    "The Statue of Liberty was a gift from France.",
+    "Your body is more than half water.",
+    "A snail has thousands of tiny teeth.",
+    "A baby is born with nearly 300 bones.",
+    "Ice floats because it is less dense than water.",
+    "There are 24 hours in a day and 168 hours in a week.",
+    "A pentagon has 5 sides.",
+    "Tigers have striped skin, not just striped fur.",
+    "The Atlantic is the second largest ocean.",
+    "Spiders are not insects; they are arachnids.",
 ]
 
 # Tier 5: longer passages, symbols, awkward letter pairs.
@@ -192,6 +306,14 @@ PASSAGES = [
     "Was the average wage a great waste? Few readers were aware; we stared at tax records, baffled & vexed.",
     "Sale: 3 for $10 (was $4.50 each). That's about 26% off, so 12 of them cost $40 instead of $54!",
     "Zebras zigzag; puzzled wizards doze. Six jazzy foxes fix a quiz box, mixing extra waxy pizza by the exit.",
+    "To the crew: the bridge opens at 9:15 a.m. on Friday! Bring gloves, a hard hat & your best typing fingers.",
+    "\"Is it done?\" asked Fern. \"Almost,\" said the builder; \"we need 40 more bricks (and maybe a snack).\"",
+    "Touch typing tip #1: keep your eyes on the screen, not the keys. Tip #2: accuracy first; speed follows.",
+    "The bakery sold 144 loaves today: 60 white, 48 wheat & 36 rye. At $3 each, that's $432 in bread alone!",
+    "Dear neighbor, thank you for fixing our leak. The kitchen is dry, the cat is calm, and dinner is at 6:00.",
+    "Unusually, the younger journalist quickly judged which fuzzy, oblong jukebox was just plain broken.",
+    "A museum ticket costs $8 for adults and $5 for kids; a family of 2 adults + 3 kids pays $31 in total.",
+    "Why did the keyboard go to school? It wanted better \"key\" skills! (Sorry... that joke was a bit shifty.)",
 ]
 
 # Tier 6: code-like lines.
@@ -209,8 +331,9 @@ CODE = [
     "try { load(); } catch (e) { log(e); }", "price = `$${(n / 100).toFixed(2)}`;",
 ]
 
-EXTRA_OK = {"qwerty", "qwertyquest", "fahrenheit", "celsius", "p.m", "wasn't",
-            "can't", "that's", "koalas", "example"}
+EXTRA_OK = {"qwerty", "qwertyquest", "fahrenheit", "celsius", "p.m", "a.m", "wasn't",
+            "can't", "that's", "koalas", "example", "let's", "don't", "dr", "ms", "mr",
+            "cow's", "fizz", "pip", "arachnids", "octopuses", "shh"}
 
 
 def load_dict():
@@ -227,7 +350,10 @@ def main():
     for w in words:
         if not re.fullmatch(r"[a-z]+", w) or w not in d:
             bad.append(w)
-    for text in PHRASES + FACTS + PASSAGES:
+    for text in LOW:
+        if not re.fullmatch(r"[a-z ,./;]+", text):
+            bad.append(f"odd character in {text!r}")
+    for text in PHRASES + FACTS + PASSAGES + LOW:
         for tok in re.findall(r"[A-Za-z][A-Za-z'.]*[A-Za-z]|[A-Za-z]", text):
             t = tok.lower()
             if t in d or t in EXTRA_OK or t.rstrip("s") in d:
@@ -263,9 +389,20 @@ def main():
             assert set(w) <= cum[i], (w, i)
             assert i == 0 or not set(w) <= cum[i - 1], (w, i)
 
+    # phrases: same sorting, with the space bar always available
+    low_by_stage = [[] for _ in STAGES]
+    for text in sorted(set(LOW)):
+        for i, ks in enumerate(cum):
+            if set(text) <= ks | {" "}:
+                low_by_stage[i].append(text)
+                break
+        else:
+            sys.exit(f"phrase {text!r} uses keys outside all stages")
+    print("phrases per stage:", [len(x) for x in low_by_stage], "total", len(set(LOW)))
+
     data = {
         "stages": [{"keys": k, "name": n} for k, n in STAGES],
-        "words": by_stage, "names": NAMES, "places": PLACES, "days": DAYS,
+        "words": by_stage, "low": low_by_stage, "names": NAMES, "places": PLACES, "days": DAYS,
         "phrases": PHRASES, "facts": FACTS, "passages": PASSAGES, "code": CODE,
     }
     out = ROOT / "js" / "content-data.js"

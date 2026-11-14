@@ -16,6 +16,7 @@ import concurrent.futures as cf
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -29,6 +30,7 @@ MODEL = "gpt-4o-mini-tts"
 CAST = {
     "fern": ("coral", "A warm, upbeat construction foreman talking to a young child. Friendly, clear, encouraging, unhurried."),
     "word": ("coral", "A friendly teacher saying one spelling word for a child. Say only the word itself, clearly and naturally, then stop."),
+    "phrase": ("coral", "A friendly teacher reading a short phrase for a child to type. Say only the phrase, clearly and naturally, then stop."),
     "letter": ("coral", "A friendly teacher naming one keyboard key for a child. Say only its name, clearly, then stop."),
     "chief": ("onyx", "A fire chief. Deep voice."),
     "plumber": ("echo", "A flustered, good-natured plumber."),
@@ -108,6 +110,10 @@ def jobs(with_words):
         voice, style = CAST["word"]
         for w in sorted({w for stage in data["words"] for w in stage}):
             out.append((f"w/{w}.mp3", voice, style, w.capitalize() + "."))
+        voice, style = CAST["phrase"]
+        for text in sorted({t for stage in data["low"] for t in stage}):
+            slug = "-".join(re.findall(r"[a-z]+", text))
+            out.append((f"p/{slug}.mp3", voice, style, text[0].upper() + text[1:].rstrip(".") + "."))
     return out
 
 

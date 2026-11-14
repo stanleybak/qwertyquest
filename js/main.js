@@ -7,7 +7,7 @@ import { missionFor, drawInterior } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-13d';
+const BUILD = '2026-11-13e';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -78,8 +78,9 @@ function sayLetter(c) {
 /** Read a word prompt aloud: recorded clips when we have them, the device voice otherwise. */
 function sayWords(text) {
   if (!P.sound || !P.vol || Voice.busy('npc')) return;
-  const keys = text.toLowerCase().split(/[^a-z]+/).filter(Boolean).map(w => 'w/' + w);
-  if (!Voice.play(keys, vol(), 'word')) say(text);
+  const words = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  if (Voice.play('p/' + words.join('-'), vol(), 'word')) return; // a whole phrase, recorded in one breath
+  if (!Voice.play(words.map(w => 'w/' + w), vol(), 'word')) say(text);
 }
 /** A character speaks. Lines are recorded by tools/build_voices.py. */
 function npc(...ids) {
@@ -156,10 +157,10 @@ function updateKb(next) {
 }
 
 // ---------- typing engine (shared by the warm-up and the game) ----------
-const T = { p: null, pos: 0, clean: true, last: 0, t0: 0, hits: 0, miss: 0, els: null, onDone: null, key: null };
+const T = { errs: new Set(), p: null, pos: 0, clean: true, last: 0, t0: 0, hits: 0, miss: 0, els: null, onDone: null, key: null };
 
 function setPrompt(p, els, onDone) {
-  T.p = p; T.pos = 0; T.clean = true; T.hits = 0; T.miss = 0; T.t0 = 0; T.els = els; T.onDone = onDone;
+  T.p = p; T.pos = 0; T.clean = true; T.hits = 0; T.miss = 0; T.t0 = 0; T.errs = new Set(); T.els = els; T.onDone = onDone;
   if (!p) { els.prompt.innerHTML = ''; els.found.classList.add('hidden'); me.prog = 0; updateKb(null); return; }
   els.prompt.className = (p.spaced ? 'spaced' : p.text.length > 70 ? 'long' : '');
   els.prompt.innerHTML = '';
@@ -202,7 +203,7 @@ function typeChar(ch) {
     return;
   }
   S.recordKey(P, want, false, 0);
-  T.miss++;
+  T.miss++; T.errs.add(want === ' ' ? 'space' : want.toLowerCase());
   sfx.bad();
   if (mode === 'game') {
     S.lessonKey(P, false);
@@ -500,6 +501,7 @@ function finishPrompt(secs) {
   }
   if (p.burst && secs <= p.burst) floatText('⚡ Speed burst!', me.x, me.y - 130, '#e6a700', 24);
   const rankBefore = S.rankOf(P).i, stepBefore = P.step;
+  S.reviewPrompt(P, p.text, T.errs);
   const res = S.lessonPrompt(P);
   if (res) {
     toast(`${'⭐'.repeat(res.stars)} Lesson done: ${Math.round(res.acc * 100)}% accurate` + (res.stars === 3 ? '. Crane earned: 3 double loads!' : ''));
@@ -507,7 +509,7 @@ function finishPrompt(secs) {
       const fresh = P.step < S.STAGES.length ? `New keys: ${S.STAGES[P.step].keys.toUpperCase().split('').join(' and ')}` : `New job: ${S.stepName(P.step)}`;
       setTimeout(() => { toast(`🎉 Promotion! ${fresh}`, 'gold'); confetti(me.x, me.y - 60, 80); sfx.win(); npc('promo'); }, 900);
     }
-    if (res.ready) setTimeout(() => toast('You are ready for something new. It unlocks tomorrow: sleep makes fingers smarter!'), 900);
+    if (res.ready) setTimeout(() => toast('That is plenty of new keys for one day. More unlock tomorrow: sleep makes fingers smarter!'), 900);
     if (res.demoted) setTimeout(() => toast('Let\'s spend a little more time on the last keys.'), 900);
     if (res.shiftDone && P.pacing) setTimeout(() => { toast('🏁 Today\'s shift is done. Great work! Come back tomorrow for more. You can keep building for fun.', 'gold'); npc('shift'); }, 1800);
   }
