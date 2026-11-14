@@ -9,7 +9,7 @@ import * as G from './games.js';
 import DATA from './content-data.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14e';
+const BUILD = '2026-11-14f';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -197,13 +197,13 @@ function updateKb(next) {
   const kb = $('kb');
   // The guide is a crutch, so it only appears when it helps: while keys are
   // new, after a slip, or when the player has been stuck on a key for a while.
-  const show = P.guide && mode === 'game' && (!!T.p || !!CH.opts)
+  const show = mode === 'place' ? !!T.p : P.guide && mode === 'game' && (!!T.p || !!CH.opts)
     && (P.fresh > 0 || P.step < 5 || (P.layout === 'dvorak' && P.step < S.STAGES.length) || T.miss > 0 || performance.now() - Math.max(T.last, T.shown) > 4000);
   if (show === kbShown && next === kbNext) return;
   kbShown = show; kbNext = next;
   kb.classList.toggle('hidden', !show);
   if (!show) return;
-  const known = P.step < S.STAGES.length ? S.cumKeys(P.step) : null;
+  const known = mode === 'game' && P.step < S.STAGES.length ? S.cumKeys(P.step) : null;
   kb.querySelectorAll('.k').forEach(k => k.classList.remove('next'));
   for (const c in keyEl) {
     if (c.length > 1) continue;
@@ -221,7 +221,7 @@ function updateKb(next) {
 const T = { shown: 0, errs: new Set(), p: null, pos: 0, clean: true, last: 0, t0: 0, hits: 0, miss: 0, els: null, onDone: null, key: null };
 
 function setPrompt(p, els, onDone) {
-  T.p = p; T.pos = 0; T.clean = true; T.hits = 0; T.miss = 0; T.t0 = 0; T.errs = new Set(); T.shown = performance.now(); T.els = els; T.onDone = onDone;
+  T.p = p; T.pos = 0; T.clean = true; T.hits = 0; T.miss = 0; T.bad = new Set(); T.t0 = 0; T.errs = new Set(); T.shown = performance.now(); T.els = els; T.onDone = onDone;
   if (!p) { els.prompt.innerHTML = ''; els.found.classList.add('hidden'); me.prog = 0; updateKb(null); return; }
   els.prompt.className = (p.spaced ? 'spaced' : p.text.length > 70 ? 'long' : '');
   els.prompt.innerHTML = '';
@@ -265,7 +265,7 @@ function typeChar(ch) {
     return;
   }
   S.recordKey(P, want, false, 0);
-  T.miss++; T.errs.add(want === ' ' ? 'space' : want.toLowerCase());
+  T.miss++; T.bad.add(T.pos); T.errs.add(want === ' ' ? 'space' : want.toLowerCase());
   sfx.bad();
   if (mode === 'game') {
     S.lessonKey(P, false);
@@ -438,16 +438,18 @@ function initStart() {
 }
 
 // ---------- warm-up (placement) ----------
-const PL = { i: 0, n: 0, hit: 0, miss: 0, time: 0, placed: 0, t0: 0, timer: null };
+const PL = { i: 0, n: 0, hit: 0, miss: 0, time: 0, placed: 0, t0: 0, timer: null, again: false };
+const PLACE_SECS = 90;
 function startPlacement() {
   mode = 'place';
   $('place').classList.remove('hidden');
-  Object.assign(PL, { i: 0, n: 0, hit: 0, miss: 0, time: 0, placed: 0, t0: 0 });
+  $('pkb').appendChild($('kb')); // the keyboard picture helps here too
+  Object.assign(PL, { i: 0, n: 0, hit: 0, miss: 0, time: 0, placed: 0, t0: 0, again: false });
   nextProbe();
   PL.timer = setInterval(() => {
     if (!PL.t0) return; // the clock starts on the first key
-    const left = 60 - (performance.now() - PL.t0) / 1000;
-    $('placebar').style.width = Math.max(0, left / 60 * 100) + '%';
+    const left = PLACE_SECS - (performance.now() - PL.t0) / 1000;
+    $('placebar').style.width = Math.max(0, left / PLACE_SECS * 100) + '%';
     if (left <= 0) endPlacement(PL.placed);
   }, 200);
   $('placebar').style.width = '100%';
@@ -456,14 +458,19 @@ function startPlacement() {
 function nextProbe() {
   const probe = S.PROBES[PL.i];
   setPrompt(S.probePrompt(P, probe), { prompt: $('pprompt'), found: $('pfound') }, secs => {
-    PL.hit += T.hits; PL.miss += T.miss; PL.time += secs;
+    // A letter counts as missed once, however many wrong keys it took: fumbling
+    // for one key says little about the rest.
+    PL.hit += T.hits; PL.miss += T.bad.size; PL.time += secs;
     if (++PL.n < probe.n) return nextProbe();
-    const acc = PL.hit / (PL.hit + PL.miss), cps = PL.hit / Math.max(0.5, PL.time);
-    if (acc >= 0.9 && cps >= probe.cps) {
-      PL.placed = probe.place;
-      Object.assign(PL, { i: PL.i + 1, n: 0, hit: 0, miss: 0, time: 0 });
+    // Always room for two misses in a round; beyond that, one letter in five (one in eight on the harder rounds).
+    const allowed = Math.max(2, Math.floor(PL.hit * (probe.step < 9 ? 0.2 : 0.12))), cps = PL.hit / Math.max(0.5, PL.time);
+    const pass = PL.miss <= allowed && cps >= probe.cps;
+    Object.assign(PL, { n: 0, hit: 0, miss: 0, time: 0 });
+    if (pass) {
+      PL.placed = probe.place; PL.i++; PL.again = false;
       return PL.i < S.PROBES.length ? nextProbe() : endPlacement(PL.placed);
     }
+    if (!PL.again) { PL.again = true; return nextProbe(); } // one rough round is not the end: try this level once more
     endPlacement(PL.placed);
   });
 }
@@ -473,7 +480,9 @@ function endPlacement(step) {
   P.step = step; P.placed = true; P.credits = 0; P.fresh = 12;
   S.saveProfile(P);
   setPrompt(null, { prompt: $('pprompt'), found: $('pfound') }, null);
+  $('panel').appendChild($('kb'));
   $('place').classList.add('hidden');
+  toast(`You start at level ${step + 1}: ${S.stepName(step)}.`, 'gold');
   startGame();
 }
 addEventListener('keydown', e => { if (mode === 'place' && !PL.t0 && charOf(e)) PL.t0 = performance.now(); }, true);
