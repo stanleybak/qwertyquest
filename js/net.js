@@ -4,8 +4,9 @@
 // A device first only listens: every host announces its city along with its
 // state. To enter a city a device asks that host, who lets it in (at once if it
 // holds the city's key from an earlier visit, otherwise when a person there
-// says yes). Inside a city, game state goes client -> host -> everyone, and
-// positions and profiles go straight between members. When the host leaves,
+// says yes). Inside a city everything goes through the host, positions and
+// profiles included: two members then see each other even when their own
+// devices cannot reach one another directly, as long as both reach the host. When the host leaves,
 // the next member in the host's join order takes over.
 import { joinRoom } from '../vendor/trystero.js';
 
@@ -261,6 +262,17 @@ export class Net {
       if (this.asking?.host === from) { this.cancelAsk(); this.h.onDenied(); }
       return;
     }
+    if (kind === 'pos' || kind === 'me') { // where a member is, and who they are: passed along by the host
+      if (!this.world) return;
+      if (this.isHost) {
+        if (!this.order.includes(from)) return;
+        this._relay(kind, data, from);
+        this.h.onMsg(kind, data, from);
+      } else if (from === this.hostId && data && typeof data.f === 'string' && data.f !== this.selfId && this.order.includes(data.f)) {
+        this.h.onMsg(kind, data.d, data.f);
+      }
+      return;
+    }
     if (!this.world || !this.order.includes(from)) return; // only members of this city are heard
     if ((kind === 'done' || kind === 'grab' || kind === 'offer' || kind === 'hold') && !this.isHost) return;
     this.h.onMsg(kind, data, from);
@@ -273,8 +285,17 @@ export class Net {
     const to = target ? [target] : kind === 'state' ? [...this.peers] : this.order.filter(id => id !== this.selfId && this.peers.has(id));
     for (const t of to) try { Promise.resolve(a.send(data, { target: t })).catch(() => {}); } catch { /* peer went away */ }
   }
+  /** Host: pass one member's position or profile on to the others. */
+  _relay(kind, data, from) {
+    for (const id of this.order) if (id !== this.selfId && id !== from && this.peers.has(id)) this._send(kind, { f: from, d: data }, id);
+  }
   /** To every member (state: to everyone in the room). */
-  broadcast(kind, data) { this._send(kind, data); }
+  broadcast(kind, data) {
+    if (kind !== 'pos' && kind !== 'me') return this._send(kind, data);
+    if (!this.world) return;
+    if (this.isHost) this._relay(kind, data, this.selfId);
+    else if (this.hostId) this._send(kind, data, this.hostId);
+  }
   /** To one peer. */
   sendTo(id, kind, data) { if (this.peers.has(id)) this._send(kind, data, id); }
   /** To the host; runs locally when this device is the host. */

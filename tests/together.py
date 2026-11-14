@@ -103,6 +103,26 @@ for who, d in (("A", a), ("B", b)):
             print("LOG", who, l["level"], l["message"][:240])
     d.quit()
 
+# three players, where two of them cannot reach each other directly: all three still see everyone
+tag = tag + "t"
+a = browser("Ann")
+time.sleep(6)
+b = browser("Bob")
+time.sleep(8)
+c = browser("Cy")
+time.sleep(9)
+ids = {n: q(d, "return window.__qq.net.selfId") for n, d in (("a", a), ("b", b), ("c", c))}
+q(b, "const n=window.__qq.net; n.badPeers.add('%s'); n.okPeers.delete('%s'); n.peers.delete('%s');" % ((ids["c"],) * 3))
+q(c, "const n=window.__qq.net; n.badPeers.add('%s'); n.okPeers.delete('%s'); n.peers.delete('%s');" % ((ids["b"],) * 3))
+q(b, "window.__qq.others.clear()")
+q(c, "window.__qq.others.clear()")
+time.sleep(10)
+for n, d in (("Ann", a), ("Bob", b), ("Cy", c)):
+    print("7", n, "counter:", d.find_element(By.ID, "crew").text, "| sees:",
+          q(d, "const now=performance.now(); return [...window.__qq.others.values()].map(o => o.name + (o.seen && now-o.at<3000 ? '' : ' (no position)'))"))
+for d in (a, b, c):
+    d.quit()
+
 # a runaway holds still while someone types at it
 a = browser("Ann")
 time.sleep(6)

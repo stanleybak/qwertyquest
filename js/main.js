@@ -10,7 +10,7 @@ import DATA from './content-data.js';
 import VERSION from './version.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14l';
+const BUILD = '2026-11-14m';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -574,7 +574,7 @@ const handlers = {
     beep(880, 0.12, 'sine', 0.08); beep(1175, 0.16, 'sine', 0.08, 0.12);
   },
   onPeers(id, joined) {
-    if (joined) { other(id); net.sendTo(id, 'me', profileMsg()); }
+    if (joined) { other(id); net.broadcast('me', profileMsg()); }
     else {
       const name = others.get(id)?.name;
       if (name && mode === 'game') toast(`👋 ${name} left the city.`);
@@ -1154,6 +1154,7 @@ function debugInfo() {
       return { id: short(id), name: o?.name, seen: !!o?.seen, posAgeMs: o?.at ? Math.round(now - o.at) : null };
     }),
     sameNetworkOnly: net?.lanOnly, shutOut: net?.badPeers.size, stillChecking: net?.checking.size,
+    members: (net?.order || []).map(id => ({ id: short(id), name: id === net.selfId ? P.name : others.get(id)?.name, direct: id === net.selfId || net.peers.has(id) })),
     hostHeardAgeMs: net?.heard ? Math.round(now - net.heard) : null,
     city: { d: st.d, have: st.have, total: st.total, boss: !!st.boss, jobs: (st.jobs || []).map(j => `${JOBS[j.t].name}:${j.hp}`), roles: Object.values(st.roles || {}) },
     player: { step: P.step, lessonsToday: P.day.lessons, credits: P.credits },
@@ -1179,7 +1180,7 @@ function updateHud(now) {
   $('shift').textContent = P.pacing ? `⭐ ${done}/${S.SHIFT_LESSONS}` : `⭐ ${P.day.lessons}`;
   const pw = [P.shields ? `🛡️×${P.shields}` : '', P.crane ? `🏗️×${P.crane}` : '', now < bootsUntil ? '👟' : '', P.streak >= 3 ? `🔥${P.streak}` : ''].filter(Boolean).join('  ');
   $('powers').textContent = pw; $('powers').classList.toggle('hidden', !pw);
-  const crew = liveOthers(now).length;
+  const crew = Math.max(0, net.order.length - 1); // everyone the host counts as in this city
   $('crew').textContent = !net.ready ? '🔎' : `👷 ${1 + crew}`;
   $('crew').title = `Builders in ${net.world?.name}` + (net.isHost && crew ? ' (this device is keeping the city)' : '');
   $('comboBox').classList.toggle('hidden', !crew); // the team meter only matters with a team
