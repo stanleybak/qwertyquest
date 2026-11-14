@@ -266,7 +266,7 @@ function drawBoss(ctx, b, x, y, t, weak, hit) {
 }
 
 /**
- * v: { w, h, cam, st, t, me, others: [player...], zone: site index or -1, weak: [keys],
+ * v: { w, h, cam, st, t, me, others: [player...] (outdoors), all: [player...] (indoors too), zone: site index or -1, weak: [keys],
  *      bossHit, fx: [{x,y,text,color,life,size}] }
  */
 export function draw(ctx, v) {
@@ -339,6 +339,32 @@ export function draw(ctx, v) {
     ctx.save(); ctx.translate(w / 2 + Math.cos(a) * (r + 34), h / 2 + Math.sin(a) * (r + 34)); ctx.rotate(a);
     ctx.fillStyle = '#e5484d'; ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -11); ctx.lineTo(-8, 11); ctx.fill();
     ctx.restore();
+  }
+  // other builders: a name tag on the building they are inside, and an arrow when they are off screen
+  const tags = new Map();
+  for (const o of v.all || []) {
+    const col = COLORS[o.color % COLORS.length] || '#888';
+    const ox = o.x - cam.x, oy = o.y - cam.y, off = Math.abs(ox) > w / 2 - 20 || Math.abs(oy) > h / 2 - 20;
+    if (o.in && !off) { // standing at this door, indoors
+      const n = tags.get(o.in) || 0; tags.set(o.in, n + 1);
+      const label = `${o.name || 'someone'} is inside`;
+      ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(label).width + 22, tx = sx(o.x), ty = sy(o.y) + 46 + n * 28;
+      ctx.fillStyle = col; rr(ctx, tx - tw / 2, ty - 12, tw, 24, 12); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = '#0006'; ctx.lineWidth = 3; ctx.strokeText(label, tx, ty + 1); ctx.fillText(label, tx, ty + 1);
+    }
+    if (!off) continue;
+    const a = Math.atan2(oy, ox), r = Math.max(70, Math.min(w, h) / 2 - 160);
+    const ax = w / 2 + Math.cos(a) * r, ay = h / 2 + Math.sin(a) * r;
+    ctx.save(); ctx.translate(ax, ay); ctx.rotate(a);
+    ctx.fillStyle = col; ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(24, 0); ctx.lineTo(-10, -15); ctx.lineTo(-10, 15); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.restore();
+    const label = (o.name || 'someone') + (o.in ? ' (inside)' : '');
+    ctx.font = '800 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.strokeText(label, ax - Math.cos(a) * 30, ay - Math.sin(a) * 30 - 18);
+    ctx.fillStyle = '#2b2340'; ctx.fillText(label, ax - Math.cos(a) * 30, ay - Math.sin(a) * 30 - 18);
   }
   // arrow back to the building site when it is off screen
   const D = district(st.d);

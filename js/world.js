@@ -115,6 +115,8 @@ export function newState() {
     boss: null, bossIn: 420, round: 0, roundLeft: 300,
     roles: {}, order: [], items: [], itemId: 1, ev: [], evId: 0,
     jobs: [], jobId: 1, jobIn: 150,
+    gen: 0,     // how many times this city has been started over
+    vote: null, // a restart being voted on: { by, yes: [ids], left }
     built: 0, next: null, // neighborhoods already constructed beyond the frontier (see Host.settle)
     rooms: {}, // how far each neighbor inside a building has been helped, 0 to 6: shared by everyone
   };
@@ -127,7 +129,7 @@ export function loadWorlds() {
 }
 export function saveWorld(world, st) {
   const all = loadWorlds();
-  all[world.id] = { key: world.key, name: world.name, apart: !!world.apart, d: st.d, have: st.have, total: st.total, rooms: st.rooms || {}, built: st.built | 0, next: st.next || null, at: Date.now() };
+  all[world.id] = { key: world.key, name: world.name, d: st.d, have: st.have, total: st.total, rooms: st.rooms || {}, built: st.built | 0, next: st.next || null, gen: st.gen | 0, at: Date.now() };
   const ids = Object.keys(all).sort((a, b) => all[b].at - all[a].at);
   for (const id of ids.slice(8)) delete all[id]; // keep the eight most recent
   try { localStorage.setItem(SAVES, JSON.stringify(all)); } catch { /* ignore */ }
@@ -288,6 +290,32 @@ export class Host {
     this.addLoads(m.site | 0, m.n === 2 ? 2 : 1);
   }
 
+  /**
+   * Starting the city over needs a yes from everyone who is connected.
+   * m: { start: true } to propose it, { yes: true | false } to answer.
+   */
+  vote(from, m) {
+    const st = this.st;
+    if (!m) return;
+    if (m.start) { if (!st.vote) st.vote = { by: from, yes: [from], left: 60 }; }
+    else if (!st.vote) return;
+    else if (m.yes === false) { st.vote = null; this.event('voteNo', { by: from }); return; }
+    else if (m.yes === true && !st.vote.yes.includes(from)) st.vote.yes.push(from);
+    this.countVotes();
+  }
+  countVotes() {
+    const st = this.st, v = st.vote;
+    if (!v) return;
+    const all = st.order.length ? st.order : [v.by];
+    if (!all.every(id => v.yes.includes(id))) return;
+    Object.assign(st, {
+      gen: (st.gen | 0) + 1, vote: null, d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, combo: 0, rooms: {}, built: 0, next: null,
+      boss: null, bossIn: 420, items: [], jobs: [], jobIn: 150,
+    });
+    this.recent = [];
+    this.event('restart');
+  }
+
   /** Someone is busy typing at a runaway: it stays put for them. */
   hold(m) {
     const j = this.st.jobs.find(x => x.id === (m && m.job));
@@ -308,6 +336,10 @@ export class Host {
   offer(w) {
     const st = this.st;
     if (!w || typeof w.total !== 'number' || !Number.isInteger(w.d) || w.d < 0 || !Array.isArray(w.have) || w.have.length !== 6) return;
+    // A copy from before the city was last started over is out of date; one from after replaces this city.
+    const gen = w.gen | 0;
+    if (gen < (st.gen | 0)) return;
+    if (gen > (st.gen | 0)) { Object.assign(st, { gen, d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, rooms: {}, built: 0, next: null, boss: null, items: [], jobs: [] }); this.event('merged'); }
     for (const [k, n] of Object.entries(w.rooms && typeof w.rooms === 'object' ? w.rooms : {}).slice(0, 2000)) {
       if (roomOk(k, Math.max(st.d, w.d))) st.rooms[k] = Math.max(st.rooms[k] | 0, Math.min(6, Math.max(0, n | 0)));
     }
@@ -325,6 +357,9 @@ export class Host {
   tick(dt) {
     this.settle();
     const st = this.st, D = district(st.d);
+    if (st.vote) { // someone who leaves no longer has to agree; an unanswered vote lapses
+      if ((st.vote.left -= dt) <= 0) { st.vote = null; this.event('voteNo', {}); } else this.countVotes();
+    }
     if ((st.roundLeft -= dt) <= 0) { st.round++; st.roundLeft = 300; this.assignRoles(); this.event('round'); }
     for (const id of st.order) if (!(id in st.roles)) { this.assignRoles(); break; }
     if (st.boss) {

@@ -10,7 +10,7 @@ import DATA from './content-data.js';
 import VERSION from './version.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14m';
+const BUILD = '2026-11-14o';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -537,15 +537,20 @@ const handlers = {
   myVer: () => VERSION,
   onClash: () => versionClash(),
   onWorlds() {
-    if (mode !== 'lobby') return;
-    if (net.asking && lobbyReady && !net.worlds.has(net.asking.host)) { net.cancelAsk(); lobbyNote = 'That city just closed.'; }
+    if (mode !== 'lobby' || !lobbyReady) return;
+    const open = openCities().filter(w => w.ver === VERSION).sort((a, b) => (a.host < b.host ? -1 : 1));
+    if (net.asking && !net.worlds.has(net.asking.host)) net.cancelAsk(); // that host went away
+    if (!net.asking && !net.world) {
+      if (open.length) joinCity(open[0]);
+      else if (!openCities().length) hostCity(Object.entries(loadWorlds()).sort((a, b) => b[1].at - a[1].at)[0]?.[0]);
+      else versionClash();
+    }
     paintLobby();
   },
   onWelcome(world) {
     // Let in. Whatever this device had built on its own is kept as its copy of
     // the new city, and offered to the host on the first state (see onState),
     // so the two cities become one with the best of both.
-    world.apart = pickedApart;
     const all = loadWorlds();
     const mine = host && mode === 'game' ? { ...st, id: leaving } : bring && all[bring] ? { ...all[bring], id: bring } : null;
     const other = mine && mine.id && mine.id !== world.id; // a different city of our own is being merged in
@@ -558,27 +563,22 @@ const handlers = {
     }
     bring = leaving = '';
     host = null; gotState = false;
-    if (mode === 'lobby') { lobbyNote = ''; paintLobby(); }
+    if (mode === 'lobby') paintLobby();
   },
-  // Hosting a city while another one is open on the same network: unless this
-  // player chose to stay apart, fold into the other and bring the progress along.
+  // Hosting a city while another one is open on the same network: fold into
+  // the other and bring the progress along.
   onFold(from, w) {
     if (mode !== 'game' || w.ver !== VERSION) return;
-    leaving = net.world.id; pickedApart = false;
+    leaving = net.world.id;
     net.ask(from, '', w.name);
   },
-  onDenied() { lobbyNote = 'They can\'t let you in right now.'; paintLobby(); },
-  onAsk(id, name) {
-    if (asks.has(id)) return;
-    asks.set(id, name); paintAsks();
-    beep(880, 0.12, 'sine', 0.08); beep(1175, 0.16, 'sine', 0.08, 0.12);
-  },
+  onDenied() { versionClash(); }, // only happens when the versions differ
   onPeers(id, joined) {
     if (joined) { other(id); net.broadcast('me', profileMsg()); }
     else {
       const name = others.get(id)?.name;
       if (name && mode === 'game') toast(`👋 ${name} left the city.`);
-      others.delete(id); if (asks.delete(id)) paintAsks();
+      others.delete(id);
     }
     if (net.isHost) st.order = net.order;
   },
@@ -604,6 +604,7 @@ const handlers = {
     else if (kind === 'done') host.done(from, data || {});
     else if (kind === 'offer') host.offer(data);
     else if (kind === 'hold') host.hold(data);
+    else if (kind === 'vote') host.vote(from, data);
     else if (kind === 'grab') {
       const it = host.grab(from, data || {});
       if (it) from === net.selfId ? grant(it.t) : net.sendTo(from, 'grant', { t: it.t });
@@ -626,6 +627,10 @@ function handleEvents() {
       const who = ev.by === net.selfId ? '' : others.get(ev.by)?.name;
       if (who && !inside) toast(`⭐ ${who} helped a neighbor. That building is done for everyone!`);
     }
+    else if (ev.t === 'restart') {
+      if (inside) leaveBuilding(); else stopTyping();
+      toast('🌱 Everyone agreed: the city starts over!', 'gold'); sfx.win();
+    } else if (ev.t === 'voteNo') toast('The city stays as it is.');
     else if (ev.t === 'back') toast(`🔑 Every neighbor needs help before new land opens. Back to ${ev.name}: go inside the ❗ buildings!`, 'gold');
     else if (ev.t === 'merged') toast('🏗️ Two cities joined into one. The best of both was kept!', 'gold');
     else if (ev.t === 'bossWin') { if (engaged === 'boss' || !busy()) { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); npc('bosswin'); } }
@@ -646,13 +651,10 @@ function handleEvents() {
 const myRole = () => (st.roles && st.roles[net?.selfId]) ?? 0;
 
 // ---------- finding a city ----------
-// After the start screen the device listens for cities on the network, then
-// either goes straight into the obvious one or shows a menu.
-const asks = new Map(); // host only: peer id -> name of someone waiting to be let in
-let lobbyNote = '', lobbyReady = false, timersOn = false, enteredAt = 0;
+// There is one city per network. After the start screen the device listens
+// for it, walks in if it is open, and opens it from its own saved copy if not.
+let lobbyReady = false, timersOn = false, enteredAt = 0;
 let bring = '', leaving = '';   // a city of this device's own whose progress goes along into the city being joined
-let knocking = false;           // waiting for someone in the city to say yes
-let pickedApart = false;        // this player chose a city from the menu, so it is never merged into another automatically
 const rid = () => [...crypto.getRandomValues(new Uint8Array(9))].map(b => b.toString(36).padStart(2, '0')).join('');
 const openCities = () => [...net.worlds.values()].filter(w => net.peers.has(w.host));
 
@@ -672,82 +674,38 @@ async function startGame() {
   if (old && !Object.keys(loadWorlds()).length) saveWorld({ id: rid(), key: rid(), name: `${P.name}'s city` }, old);
   setTimeout(() => {
     lobbyReady = true;
-    let menu = false;
-    try { menu = !!sessionStorage.getItem('qq.menu'); sessionStorage.removeItem('qq.menu'); } catch { /* ignore */ }
     const saved = loadWorlds(), ids = Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at);
-    const open = openCities().filter(w => w.ver === VERSION), recent = saved[ids[0]];
+    const open = openCities().filter(w => w.ver === VERSION).sort((a, b) => (a.host < b.host ? -1 : 1));
     if (mode !== 'lobby' || net.asking) return;
     if (openCities().length > open.length) versionClash();
-    if (!menu) {
-      // No questions unless there is a real choice to make.
-      const known = open.find(w => saved[w.id]);
-      if (known) return joinCity(known, false);                 // this device's own city is open here: walk right in
-      if (recent?.apart || !open.length) return hostCity(ids[0], !!recent?.apart); // carry on with its own city
-      if (open.length === 1 && !open[0].apart) { bring = ids[0] || ''; return joinCity(open[0], false); } // one city here: join it, and merge
-    }
-    paintLobby();
+    // One city per network. If it is open, walk in and bring this device's own
+    // copy along to be merged; otherwise open it from here.
+    if (open.length) { bring = saved[open[0].id] ? '' : ids[0] || ''; return joinCity(open[0]); }
+    if (openCities().length) return; // the city here is updating: wait for it (see onWorlds)
+    hostCity(ids[0]);
   }, net.room ? 3500 : 0);
 }
-/** Ask to enter a city. picked: chosen from the menu, so someone there says yes first and it stays a separate city. */
-function joinCity(w, picked) {
-  const mine = loadWorlds()[w.id];
-  lobbyNote = ''; pickedApart = picked || !!mine?.apart; knocking = picked && !mine;
-  net.ask(w.host, mine?.key || '', w.name, picked);
+function joinCity(w) {
+  net.ask(w.host, loadWorlds()[w.id]?.key || '', w.name);
   paintLobby();
 }
 /** Host a saved city, or a brand new one when `id` is empty. */
-function hostCity(id, apart) {
+function hostCity(id) {
   const saved = id && loadWorlds()[id];
-  const world = saved ? { id, key: saved.key, name: saved.name, apart } : { id: rid(), key: rid(), name: `${P.name}'s city`, apart };
-  pickedApart = !!apart;
+  const world = saved ? { id, key: saved.key, name: saved.name } : { id: rid(), key: rid(), name: `${P.name}'s city` };
   st = newState();
-  if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total, rooms: { ...saved.rooms }, built: saved.built | 0, next: saved.next || null });
+  if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total, rooms: { ...saved.rooms }, built: saved.built | 0, next: saved.next || null, gen: saved.gen | 0 });
   host = new Host(st);
   net.open(world);
   enterCity();
 }
 function paintLobby() {
   const el = $('lobbyBody'); el.innerHTML = '';
-  const add = (tag, text, cls) => { const x = document.createElement(tag); x.textContent = text; if (cls) x.className = cls; el.appendChild(x); return x; };
-  if (net.asking || (net.world && mode === 'lobby')) {
-    const name = net.asking ? net.asking.name : net.world.name;
-    if (!knocking) { add('h2', '🏙️ Joining…'); add('p', `Walking into ${name}.`, 'sub'); return; }
-    add('h2', `🚪 Knock, knock!`);
-    add('p', `Asking to join ${name}…`, 'sub');
-    add('p', 'Someone there needs to press ✔ Let in.', 'small');
-    if (net.asking) add('button', 'Never mind', '').onclick = () => { net.cancelAsk(); paintLobby(); };
-    return;
-  }
-  if (!lobbyReady) { add('h2', '🔎 Looking for cities…'); add('p', 'Checking who is building on your Wi-Fi.', 'sub'); return; }
-  add('h2', '🏙️ Pick a city');
-  if (lobbyNote) add('p', lobbyNote, 'sub');
-  const saved = loadWorlds(), open = openCities();
-  for (const w of open) {
-    const b = add('button', '', 'city'), same = w.ver === VERSION;
-    b.append(`🏙️ ${w.name}`, Object.assign(document.createElement('small'), { textContent: same ? `${w.n} building there now · ask to join` : 'getting an update… one moment' }));
-    b.disabled = !same; // everyone in a city runs the same version
-    if (same) b.onclick = () => joinCity(w, true); else versionClash();
-  }
-  for (const id of Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at).slice(0, 4)) {
-    if (open.some(w => w.id === id)) continue;
-    const b = add('button', '', 'city');
-    b.append(`▶ ${saved[id].name}`, Object.assign(document.createElement('small'), { textContent: `saved here · ${saved[id].d} neighborhood${saved[id].d === 1 ? '' : 's'} finished` }));
-    b.onclick = () => hostCity(id, true);
-  }
-  add('button', '➕ Start a brand new city', 'city').onclick = () => hostCity('', true);
-}
-/** Host: people waiting to be let in, shown under the top-right buttons. */
-function paintAsks() {
-  const el = $('asks'); el.innerHTML = '';
-  for (const [id, name] of asks) {
-    const card = document.createElement('div'); card.className = 'ask';
-    const t = document.createElement('div'); t.textContent = `🙋 ${name} wants to join`;
-    const yes = document.createElement('button'); yes.textContent = '✔ Let in'; yes.className = 'yes';
-    const no = document.createElement('button'); no.textContent = '✖ Not now';
-    yes.onclick = () => { net.admit(id); asks.delete(id); paintAsks(); toast(`${name} joined your city.`); };
-    no.onclick = () => { net.deny(id); asks.delete(id); paintAsks(); };
-    card.append(t, yes, no); el.appendChild(card);
-  }
+  const add = (tag, text, cls) => { const x = document.createElement(tag); x.textContent = text; if (cls) x.className = cls; el.appendChild(x); };
+  const name = net.asking ? net.asking.name : net.world?.name;
+  if (name) { add('h2', '🏙️ Joining…'); add('p', `Walking into ${name}.`, 'sub'); }
+  else if (lobbyReady && openCities().length) { add('h2', '✨ One moment…'); add('p', 'The city here is getting an update.', 'sub'); }
+  else { add('h2', '🔎 Looking for your city…'); add('p', 'Checking who is building on your Wi-Fi.', 'sub'); }
 }
 
 // ---------- the game ----------
@@ -833,7 +791,7 @@ function hostTick() {
   const now = performance.now(), dt = Math.min(2, (now - lastTick) / 1000);
   lastTick = now;
   if (!host || !net.isHost) return;
-  st.order = net.order; st.w = net.world.id; st.wn = net.world.name; st.ver = VERSION; st.apart = !!net.world.apart;
+  st.order = net.order; st.w = net.world.id; st.wn = net.world.name; st.ver = VERSION;
   host.tick(dt);
   net.broadcast('state', st);
   handleEvents();
@@ -1162,6 +1120,59 @@ function debugInfo() {
   }, null, 1);
 }
 
+/** The restart vote: everyone connected has to say yes. */
+let voteKey = '';
+function paintVote() {
+  const v = st.vote, el = $('vote');
+  const key = v ? `${v.by}:${v.yes.length}:${v.yes.includes(net.selfId)}:${net.order.length}` : '';
+  if (key === voteKey) return;
+  voteKey = key;
+  el.classList.toggle('hidden', !v);
+  if (!v) return;
+  el.innerHTML = '';
+  const who = v.by === net.selfId ? 'You' : others.get(v.by)?.name || 'Someone';
+  const line = t => { const d = document.createElement('div'); d.textContent = t; el.appendChild(d); };
+  const btn = (t, cls, yes) => { const b = document.createElement('button'); b.textContent = t; b.className = cls; b.onclick = () => { net.toHost('vote', { yes }); b.blur(); }; el.appendChild(b); };
+  if (v.yes.includes(net.selfId)) {
+    line(`🗳️ Restart the city? ${v.yes.length} of ${net.order.length} said yes.`);
+    line('Waiting for everyone to agree…');
+    btn('Never mind, keep it', '', false);
+  } else {
+    line(`🗳️ ${who} want${who === 'You' ? '' : 's'} to restart the city.`);
+    line('Everything built would be erased.');
+    btn('✔ Yes, restart', 'yes', true); btn('✖ No, keep it', '', false);
+    beep(660, 0.12, 'sine', 0.07); beep(660, 0.12, 'sine', 0.07, 0.2);
+  }
+}
+/** Where a builder is, in a few words. */
+function whereIs(insideId, fresh) {
+  if (!fresh) return '…';
+  if (!insideId) return 'outside';
+  const [i, k] = insideId.split(':').map(Number);
+  return Number.isInteger(i) && k >= 0 && k < 6 ? `in ${missionFor(i, k).title.replace(/^The /, 'the ')}` : 'inside';
+}
+/** The list under the 👷 button: everyone in this city and where they are. */
+function paintCrew(now) {
+  const el = $('crewPop'); el.innerHTML = '';
+  const row = (name, color, where) => {
+    const r = document.createElement('div'); r.className = 'who';
+    const dot = document.createElement('i'); dot.style.background = COLORS[color % COLORS.length];
+    const n = document.createElement('span'); n.textContent = name;
+    const w = document.createElement('small'); w.textContent = where;
+    r.append(dot, n, w); el.appendChild(r);
+  };
+  row(`${P.name} (you)`, P.color, whereIs(inside?.id, true));
+  for (const id of net.order) {
+    if (id === net.selfId) continue;
+    const o = others.get(id);
+    row(o?.name || 'someone new', o?.color | 0, whereIs(o?.in, !!o?.seen && now - o.at < 6000));
+  }
+}
+function crewOpen(open) {
+  $('crewPop').classList.toggle('hidden', !open);
+  $('crew').setAttribute('aria-expanded', open);
+  if (open) paintCrew(performance.now());
+}
 let hudAt = 0;
 function updateHud(now) {
   if (now - hudAt < 250) return;
@@ -1182,6 +1193,8 @@ function updateHud(now) {
   $('powers').textContent = pw; $('powers').classList.toggle('hidden', !pw);
   const crew = Math.max(0, net.order.length - 1); // everyone the host counts as in this city
   $('crew').textContent = !net.ready ? '🔎' : `👷 ${1 + crew}`;
+  if (!$('crewPop').classList.contains('hidden')) paintCrew(now);
+  paintVote();
   $('crew').title = `Builders in ${net.world?.name}` + (net.isHost && crew ? ' (this device is keeping the city)' : '');
   $('comboBox').classList.toggle('hidden', !crew); // the team meter only matters with a team
 }
@@ -1288,7 +1301,7 @@ function frame(now) {
     return;
   }
   draw(ctx, {
-    w: vw, h: vh, cam, st, t: now / 1000, me, others: liveOthers(now).filter(o => !o.inside),
+    w: vw, h: vh, cam, st, t: now / 1000, me, others: liveOthers(now).filter(o => !o.inside), all: liveOthers(now),
     door: doorId, roomDone: id => rooms()[roomKey(id)] >= 6,
     zone, job: curJob, weak: st.boss ? S.weakKeys(P, 4) : [], bossHit, fx,
   });
@@ -1348,6 +1361,8 @@ function openAdult() {
 }
 $('btnWear').onclick = openWardrobe;
 $('btnAdult').onclick = openAdult;
+$('crew').onclick = () => { crewOpen($('crewPop').classList.contains('hidden')); $('crew').blur(); };
+addEventListener('pointerdown', e => { if (!$('crewWrap').contains(e.target)) crewOpen(false); }, true);
 $('btnKeys').onclick = () => {
   let layout = P.layout;
   layoutButtons($('kLayouts'), () => layout, l => { layout = l; });
@@ -1395,7 +1410,12 @@ $('aMake').onclick = () => { // four random words: easy to read out over the pho
   const ws = DATA.words.flat().filter(w => w.length >= 4 && w.length <= 6), r = crypto.getRandomValues(new Uint32Array(4));
   $('aRoom').value = [...r].map(n => ws[n % ws.length]).join(' ');
 };
-$('aLeave').onclick = () => { try { sessionStorage.setItem('qq.menu', '1'); } catch { /* ignore */ } location.reload(); };
+$('aRestart').onclick = () => {
+  const n = net.order.length;
+  if (!confirm(n > 1 ? `Start the whole city over? Everything built will be erased. All ${n} builders here have to agree.` : 'Start the whole city over? Everything built will be erased.')) return;
+  net.toHost('vote', { start: true });
+  $('adult').classList.add('hidden');
+};
 $('aRetest').onclick = () => { P.placed = false; S.saveProfile(P); location.reload(); };
 $('aReset').onclick = () => { if (confirm('Erase this player\'s progress on this device?')) { S.resetProfile(); location.reload(); } };
 document.querySelectorAll('.screen .close').forEach(b => { b.onclick = () => { b.closest('.screen').classList.add('hidden'); b.blur(); }; });
@@ -1407,4 +1427,4 @@ initStart();
 let resume = false;
 try { resume = !!sessionStorage.getItem('qq.resume'); sessionStorage.removeItem('qq.resume'); } catch { /* ignore */ }
 if (resume && P.name && P.placed) { $('start').classList.add('hidden'); startGame(); }
-window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, others, roomKeyOf, district, party }; // for debugging in the console
+window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, others, roomKeyOf, get vote() { return st.vote; }, district, party }; // for debugging in the console

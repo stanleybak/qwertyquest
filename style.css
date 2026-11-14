@@ -123,12 +123,15 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #vol { padding: 0; border: 0; margin-top: 6px; }
 #skip { margin-top: 16px; font-size: 1.2rem; font-weight: 800; padding: 14px 22px; background: #e3f6d8; }
 #pkb { min-height: 8px; }
-button.city { display: block; width: 100%; margin-top: 12px; padding: 16px 18px; font-size: 1.35rem; font-weight: 800; text-align: left; border: 3px solid #0001; }
-button.city small { display: block; font-size: 1rem; font-weight: 600; color: #6b6480; margin-top: 2px; }
-button.city:hover { border-color: var(--accent); }
-#asks { position: fixed; top: 72px; right: 12px; z-index: 6; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
 .ask { background: var(--paper); border-radius: 18px; padding: 14px 16px; box-shadow: 0 6px 18px #0005; font-size: 1.25rem; font-weight: 800; animation: pop .25s ease-out; }
 .ask button { margin: 10px 8px 0 0; font-size: 1.15rem; font-weight: 800; }
 .ask button.yes { background: var(--good); color: #fff; }
 #update { position: fixed; left: 12px; top: 72px; z-index: 6; }
 #kb .k.rh { margin-left: calc(var(--kp) * 0.4); } /* a small gap between the two hands */
+#crewWrap { position: relative; display: inline-flex; }
+#hud #crew { width: auto; height: auto; padding: 9px 16px; font-size: 1.2rem; border-radius: 999px; pointer-events: auto; }
+#crewPop { position: absolute; top: 58px; right: 0; z-index: 6; pointer-events: auto; background: #fffaf0; border-radius: 16px; padding: 10px 18px; box-shadow: 0 6px 18px #0004; min-width: 230px; font-size: 1.2rem; font-weight: 800; }
+#crewPop .who { display: flex; gap: 10px; align-items: center; padding: 7px 0; white-space: nowrap; }
+#crewPop .who i { width: 18px; height: 18px; border-radius: 50%; flex: none; }
+#crewPop .who small { color: #6b6480; font-weight: 600; font-size: 1rem; margin-left: auto; padding-left: 18px; }
+#vote { position: fixed; left: 12px; top: 160px; z-index: 6; max-width: 360px; }

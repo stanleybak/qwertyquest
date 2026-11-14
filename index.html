@@ -23,7 +23,10 @@
   <div class="hud-right">
     <div id="shift" class="chip" title="Lessons finished today. Nine make a full day's shift."></div>
     <div id="powers" class="chip" title="Shield: forgives a slip. Crane: double loads. Fire: clean streak."></div>
-    <div id="crew" class="chip" title="Builders here"></div>
+    <span id="crewWrap">
+      <button id="crew" class="chip" title="Who is here" aria-haspopup="true" aria-expanded="false"></button>
+      <div id="crewPop" class="hidden"></div>
+    </span>
     <button id="btnWear" title="Wardrobe">🎒</button>
     <span id="soundWrap">
       <button id="btnSound" title="Volume" aria-haspopup="true" aria-expanded="false">🔊</button>
@@ -35,7 +38,7 @@
 </div>
 
 <div id="toasts"></div>
-<div id="asks"></div>
+<div id="vote" class="ask hidden"></div>
 <div id="update" class="ask hidden"><span id="updateMsg">✨ A new version is ready.</span><br><button id="updateGo" class="yes">🔄 Update now</button></div>
 
 <div id="panel" class="hidden">
@@ -118,8 +121,8 @@
     <p class="small">Anyone who has the code can join, so do not use a single easy word. <button id="aMake" class="link" type="button">Make a four-word code for me</button></p>
     <div id="aStats" class="small"></div>
     <div class="rowbtn">
-      <button id="aLeave">Leave this city (pick another or start a new one)</button>
       <button id="aJoin">Join room</button>
+      <button id="aRestart" class="danger">Restart the city (everyone must agree)</button>
       <button id="aRetest">Redo the warm-up</button>
       <button id="aReset" class="danger">Erase this player</button>
       <button id="aDebug">Copy debug info</button>

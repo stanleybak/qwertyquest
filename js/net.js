@@ -1,12 +1,11 @@
-// Networking: Trystero full mesh. Devices that find each other share a room,
-// and inside the room there can be several cities. Each city has one host.
+// Networking: Trystero full mesh, with one city per network and one host per city.
 //
-// A device first only listens: every host announces its city along with its
-// state. To enter a city a device asks that host, who lets it in (at once if it
-// holds the city's key from an earlier visit, otherwise when a person there
-// says yes). Inside a city everything goes through the host, positions and
-// profiles included: two members then see each other even when their own
-// devices cannot reach one another directly, as long as both reach the host. When the host leaves,
+// A device first only listens: the host announces the city along with its
+// state. If the city is open the device asks its host and is let in; if two
+// are open (two devices started at once, or the network split and healed)
+// they fold into one. Inside the city everything goes through the host,
+// positions and profiles included, so two members see each other even when
+// their own devices cannot reach one another directly. When the host leaves,
 // the next member in the host's join order takes over.
 import { joinRoom } from '../vendor/trystero.js';
 
@@ -39,9 +38,10 @@ export async function findRoom(code, fakeNet) {
   return { id: 'lan-' + await sha('lan:' + ip), label: 'your network', lan: true };
 }
 
+/** Browsers often hide addresses in their statistics: an empty string, or a placeholder. */
+const hidden = addr => !addr || addr.startsWith('(');
 /** Is this address one that only a device on the same local network can reach? */
 function isLocal(addr) {
-  if (!addr) return true; // some browsers hide it; a public address is never hidden
   const a = addr.toLowerCase().replace(/^\[|\]$/g, '');
   if (a.endsWith('.local')) return true; // an mDNS name only resolves on this network
   if (/^(10\.|192\.168\.|169\.254\.|127\.)/.test(a)) return true;
@@ -50,10 +50,21 @@ function isLocal(addr) {
   return a === '::1' || /^fe[89ab]/.test(a) || /^f[cd]/.test(a);
 }
 /**
- * How this browser actually reaches a peer. Returns true when the working
- * route goes straight to a local address, false when it goes over the
- * internet, and null when the connection has not settled yet. The answer comes
- * from our own browser's connection statistics, not from anything the peer says.
+ * How this browser actually reaches a peer. Returns true when the peer is on
+ * the local network, false when it came in over the internet, and null when
+ * the connection has not settled yet. The answer comes from our own browser's
+ * connection statistics, not from anything the peer claims.
+ *
+ * Two things are checked:
+ * 1. Every address the peer offered must be a local one. An outsider has to
+ *    offer a public address (its own, or one from a STUN or TURN server) to be
+ *    reachable at all, and this browser, having no STUN server, only ever
+ *    sends to addresses that were offered.
+ * 2. The route in use must end at one of those, or at a "peer reflexive"
+ *    address, which is one learned from the first packets instead of from the
+ *    offer. Firefox hides those addresses, and they are common between two
+ *    devices on one network, so a hidden one is accepted; a visible one must
+ *    be private.
  */
 async function reachedLocally(pc) {
   if (!pc || pc.connectionState === 'closed' || pc.connectionState === 'failed') return null;
@@ -63,18 +74,20 @@ async function reachedLocally(pc) {
   if (!pair) for (const r of stats.values()) if (r.type === 'candidate-pair' && (r.selected || (r.nominated && r.state === 'succeeded'))) pair = r;
   const remote = pair && stats.get(pair.remoteCandidateId);
   if (!remote) return null;
+  for (const r of stats.values()) {
+    if (r.type !== 'remote-candidate' || r.candidateType === 'prflx') continue;
+    const addr = r.address ?? r.ip;
+    if (r.candidateType !== 'host' || !(hidden(addr) || isLocal(addr))) return false; // it offered a way in from outside
+  }
   const addr = remote.address ?? remote.ip;
-  if (remote.candidateType === 'host') return isLocal(addr);
-  // A local peer can also turn up as "peer reflexive": its address was learned
-  // from the first packets instead of from signalling. That only counts when
-  // the address is visible and private.
-  return remote.candidateType === 'prflx' && !!addr && isLocal(addr);
+  if (remote.candidateType === 'host' || remote.candidateType === 'prflx') return hidden(addr) || isLocal(addr);
+  return false;
 }
 
 export class Net {
   /**
    * handlers: getState(), onState(state), onBecomeHost(), onPeers(id, joined), onMsg(kind, data, from),
-   *   onAsk(id, name), onWelcome(world), onDenied(), onWorlds()
+   *   onWelcome(world), onDenied(), onFold(hostId, city), onWorlds(), myName(), myVer(), onClash()
    */
   constructor(handlers) {
     this.h = handlers;
@@ -91,14 +104,15 @@ export class Net {
     this.asking = null;       // { host, key, name, timer } while waiting to be let in
     this.lanOnly = false;     // only accept peers reached directly over the local network
     this.okPeers = new Set();
-    this.badPeers = new Set();
+    this.badPeers = new Map(); // peer id -> when it failed the check; it gets another look later
     this.checking = new Set();
   }
   get isHost() { return !!this.world && this.hostId === this.selfId; }
 
   /** Decide whether a newly connected peer is really on this network, then let it in or shut it out. */
   async _vet(userId, tries = 0) {
-    if (this.okPeers.has(userId) || this.badPeers.has(userId) || (tries === 0 && this.checking.has(userId))) return;
+    if (this.okPeers.has(userId) || (tries === 0 && this.checking.has(userId))) return;
+    if (performance.now() - (this.badPeers.get(userId) || -1e9) < 15000) return; // failed a moment ago: wait before looking again
     this.checking.add(userId);
     let verdict = null, pcs = [];
     try {
@@ -110,10 +124,11 @@ export class Net {
       return;
     }
     this.checking.delete(userId);
-    if (verdict) { this.okPeers.add(userId); this.peers.add(userId); return; }
-    this.badPeers.add(userId);
-    console.info('ignored a builder who is not on this network', userId.slice(0, 6));
-    for (const pc of pcs) try { pc.close(); } catch { /* already gone */ }
+    if (verdict) { this.badPeers.delete(userId); this.okPeers.add(userId); this.peers.add(userId); return; }
+    // Not let in, and sent nothing. The connection is left alone and looked at
+    // again later, because a route can settle on a better path after a moment.
+    if (!this.badPeers.has(userId)) console.info('ignoring a device that does not look like it is on this network', userId.slice(0, 6));
+    this.badPeers.set(userId, performance.now());
   }
 
   /**
@@ -132,7 +147,7 @@ export class Net {
       console.warn('network unavailable, playing solo', e);
       this.room = null; return;
     }
-    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'hold', 'ask', 'welcome', 'deny']) {
+    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'hold', 'vote', 'ask', 'welcome', 'deny']) {
       const a = this.acts[kind] = this.room.makeAction(kind);
       a.onMessage((data, ctx) => this._recv(kind, data, ctx.userId));
     }
@@ -140,7 +155,7 @@ export class Net {
       if (this.lanOnly) this._vet(userId); else this.peers.add(userId);
     }, { replay: true });
     this.room.onUserLeave(({ userId }) => {
-      this.okPeers.delete(userId); // a peer that comes back is checked again
+      this.okPeers.delete(userId); this.badPeers.delete(userId); // a peer that comes back is checked again
       this.peers.delete(userId);
       this.worlds.delete(userId);
       this._drop(userId);
@@ -195,9 +210,9 @@ export class Net {
     this._claim();
   }
   /** Ask the host of a city to let this device in. `key` gets a past member in without anyone having to say yes. */
-  ask(hostId, key, name, pick = false) {
+  ask(hostId, key, name) {
     this.cancelAsk();
-    const knock = () => this._send('ask', { key: key || '', name: this.h.myName(), ver: this.h.myVer(), pick }, hostId);
+    const knock = () => this._send('ask', { key: key || '', name: this.h.myName(), ver: this.h.myVer() }, hostId);
     this.asking = { host: hostId, name, timer: setInterval(knock, 2000) };
     knock();
   }
@@ -219,12 +234,12 @@ export class Net {
     const now = performance.now();
     if (kind === 'state') {
       if (!data || typeof data.w !== 'string') return;
-      this.worlds.set(from, { id: data.w, name: String(data.wn || 'A city').slice(0, 24), host: from, n: (data.order || []).length, d: data.d | 0, ver: data.ver, apart: !!data.apart, at: now });
+      this.worlds.set(from, { id: data.w, name: String(data.wn || 'A city').slice(0, 24), host: from, n: (data.order || []).length, d: data.d | 0, ver: data.ver, at: now });
       if (!this.world) return;
       if (data.w !== this.world.id) { // some other city
-        // Two cities on one network become one, unless a player chose to keep theirs apart.
-        // The one whose host has the lower id stays. A city kept apart is left alone, both ways.
-        if (this.isHost && !this.world.apart && !data.apart && !this.asking && from < this.selfId) this.h.onFold(from, this.worlds.get(from));
+        // One city per network: when two are open, the one whose host has the lower id stays
+        // and the other folds into it, bringing what it built.
+        if (this.isHost && !this.asking && from < this.selfId) this.h.onFold(from, this.worlds.get(from));
         return;
       }
       if (this.isHost) {
@@ -244,15 +259,13 @@ export class Net {
     if (kind === 'ask') {
       if (!this.isHost) return;
       if (!data || data.ver !== this.h.myVer()) { this.deny(from); this.h.onClash(); return; } // a city runs one version of the game
-      // Walk-ins are the normal case. Only someone who picked this city from a menu of several waits for a yes.
-      if (!data.pick || (data.key && data.key === this.world.key)) this.admit(from);
-      else this.h.onAsk(from, String((data && data.name) || 'Someone').slice(0, 12));
+      this.admit(from); // everyone on this network builds the same city
       return;
     }
     if (kind === 'welcome') {
       if (this.asking?.host !== from || !data || typeof data.id !== 'string') return;
       this.cancelAsk();
-      this.world = { id: data.id, key: String(data.key || ''), name: String(data.name || 'A city').slice(0, 24), apart: false };
+      this.world = { id: data.id, key: String(data.key || ''), name: String(data.name || 'A city').slice(0, 24) };
       this.hostId = from; this.heard = now;
       this._setOrder([from, this.selfId]);
       this.h.onWelcome(this.world);
@@ -274,7 +287,7 @@ export class Net {
       return;
     }
     if (!this.world || !this.order.includes(from)) return; // only members of this city are heard
-    if ((kind === 'done' || kind === 'grab' || kind === 'offer' || kind === 'hold') && !this.isHost) return;
+    if ((kind === 'done' || kind === 'grab' || kind === 'offer' || kind === 'hold' || kind === 'vote') && !this.isHost) return;
     this.h.onMsg(kind, data, from);
   }
 
