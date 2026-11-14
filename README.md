@@ -17,4 +17,9 @@ There is no build step and no backend.
   checks every word against the system dictionary, sorts words by the keys
   they need, and writes `js/content-data.js`.
 
+- **Voices.** `tools/build_voices.py` records every spoken line, letter and
+  word once with OpenAI text-to-speech and saves them under `audio/`. It reads
+  the key from the `OPENAI_KEY` environment variable; the key is never stored.
+  Re-running only records lines that changed.
+
 Local testing: `python3 -m http.server` and open two browser windows.

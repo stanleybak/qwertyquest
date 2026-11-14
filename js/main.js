@@ -1,11 +1,13 @@
 // QwertyQuest: screens, input, the typing engine, and the frame loop.
 import * as S from './skill.js';
 import { Net, findRoom } from './net.js';
-import { Host, newState, loadWorld, saveWorld, district, ZONE_R, JOBS, onRiver } from './world.js';
-import { draw, COLORS } from './render.js';
+import { Host, newState, loadWorld, saveWorld, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
+import * as Voice from './voice.js';
+import { missionFor, drawInterior } from './missions.js';
+import { draw, drawPlayer, COLORS } from './render.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-13c';
+const BUILD = '2026-11-13d';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -20,6 +22,8 @@ const fx = [];
 const cam = { x: 0, y: 0 };
 const asked = new Set();
 let curJob = 0;
+let inside = null;             // { id, m, placed, pop } while visiting a building
+let doorId = null, nagAt = 0;
 
 // ---------- sound ----------
 let ac = null;
@@ -63,8 +67,27 @@ function say(text) {
     speechSynthesis.speak(u);
   } catch { /* no speech */ }
 }
+const vol = () => Math.min(1, P.vol * 1.3);
+const KEY_NAMES = { ';': 'semicolon', ',': 'comma', '.': 'period', '/': 'slash', ' ': 'space' };
 // letter drills: say just the next letter, by name
-const sayLetter = c => say(c === ';' ? 'semicolon' : c === ' ' ? 'space' : c.toUpperCase());
+function sayLetter(c) {
+  if (!P.sound || !P.vol || Voice.busy('npc')) return;
+  const name = KEY_NAMES[c] || c.toLowerCase();
+  if (!Voice.play('l/' + name, vol(), 'word')) say(KEY_NAMES[c] || c.toUpperCase());
+}
+/** Read a word prompt aloud: recorded clips when we have them, the device voice otherwise. */
+function sayWords(text) {
+  if (!P.sound || !P.vol || Voice.busy('npc')) return;
+  const keys = text.toLowerCase().split(/[^a-z]+/).filter(Boolean).map(w => 'w/' + w);
+  if (!Voice.play(keys, vol(), 'word')) say(text);
+}
+/** A character speaks. Lines are recorded by tools/build_voices.py. */
+function npc(...ids) {
+  if (!P.sound || !P.vol) return;
+  Voice.play(ids.map(i => 'n/' + i).filter(Voice.has), vol(), 'npc');
+}
+/** Say a tutorial line only the first time it is relevant. */
+function tip(id) { if (P.tips[id]) return; P.tips[id] = 1; npc(id); }
 
 // ---------- toasts and effects ----------
 function toast(text, cls = '') {
@@ -152,7 +175,7 @@ function setPrompt(p, els, onDone) {
     const b = document.createElement('b'); b.textContent = p.show[p.mark]; f.append(b, p.show.slice(p.mark + 1));
   } else els.found.classList.add('hidden');
   paintPrompt();
-  if (S.tierOf(P.step) <= 2 && mode === 'game') p.spaced ? sayLetter(p.text[0]) : p.say && say(p.say);
+  if (S.tierOf(P.step) <= 2 && mode === 'game') p.spaced ? sayLetter(p.text[0]) : p.say && sayWords(p.say);
 }
 function paintPrompt() {
   const kids = T.els.prompt.children;
@@ -309,7 +332,7 @@ const handlers = {
       o.prog = Math.min(1, Math.max(0, data[2] / 100 || 0));
       o.walk = !!(data[3] & 1); if (data[3] & 2) o.stumble = 0.5;
       o.face = data[4] < 0 ? -1 : 1;
-      o.boat = !!(data[3] & 4); o.act = data[5] | 0;
+      o.boat = !!(data[3] & 4); o.inside = !!(data[3] & 8); o.act = data[5] | 0;
       if (!o.seen) { o.x = o.tx; o.y = o.ty; o.seen = true; }
       o.at = performance.now();
     } else if (kind === 'me') applyProfile(other(from), data || {});
@@ -328,21 +351,21 @@ function handleEvents() {
   for (const ev of st.ev) {
     if (ev.id <= lastEv) continue;
     lastEv = ev.id;
-    if (ev.t === 'built') { const s = district(ev.d).sites[ev.site]; if (s) confetti(s.x, s.y - 80); sfx.win(); }
+    if (ev.t === 'built') { const s = district(ev.d).sites[ev.site]; if (s) confetti(s.x, s.y - 80); sfx.win(); tip('built'); }
     else if (ev.t === 'district') {
       toast(`🎉 ${ev.name} is finished! A new neighborhood opens: ${district(ev.d + 1).name}`, 'gold');
-      confetti(me.x, me.y - 60, 120); sfx.win();
-    } else if (ev.t === 'gold') { toast('⭐ Team combo! Bonus bricks for every site.', 'gold'); sfx.win(); }
-    else if (ev.t === 'boss') toast('👾 A Typo Monster! Type to pelt it with bricks. Its weak spots are YOUR tricky keys.');
-    else if (ev.t === 'bossWin') { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); }
-    else if (ev.t === 'bossFlee') toast('The Typo Monster kicked a brick loose and wandered off.');
-    else if (ev.t === 'job') { toast('🚨 ' + JOBS[ev.jt].call); beep(880, 0.12, 'square', 0.05); beep(660, 0.12, 'square', 0.05, 0.14); }
-    else if (ev.t === 'jobGone') toast(ev.jt === 3 ? 'The brick thief got away this time.' : 'That problem sorted itself out.');
+      confetti(me.x, me.y - 60, 120); sfx.win(); npc('district');
+    } else if (ev.t === 'gold') { toast('⭐ Team combo! Bonus bricks for every site.', 'gold'); sfx.win(); npc('combo'); }
+    else if (ev.t === 'boss') { toast('👾 A Typo Monster! Type to pelt it with bricks. Its weak spots are YOUR tricky keys.'); npc('boss'); }
+    else if (ev.t === 'bossWin') { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); npc('bosswin'); }
+    else if (ev.t === 'bossFlee') { toast('The Typo Monster kicked a brick loose and wandered off.'); npc('bossflee'); }
+    else if (ev.t === 'job') { toast('🚨 ' + JOBS[ev.jt].call); npc('job' + ev.jt); beep(880, 0.12, 'square', 0.05); beep(660, 0.12, 'square', 0.05, 0.14); }
+    else if (ev.t === 'jobGone') { toast(ev.jt === 3 ? 'The brick thief got away this time.' : 'That problem sorted itself out.'); if (ev.jt === 3) npc('job3gone'); }
     else if (ev.t === 'jobDone') {
       const names = (ev.who || []).map(id => (id === net.selfId ? me.name : others.get(id)?.name)).filter(Boolean);
       toast(`${JOBS[ev.jt].icon} ${names.join(' and ') || 'The crew'} ${JOBS[ev.jt].done}! The neighbors sent bricks to say thanks.`, 'gold');
       ['🙋 Thank you!', '🙆 You saved the day!', '❤️', '❤️'].forEach((t, i) => setTimeout(() => floatText(t, ev.x - 60 + i * 40, ev.y - 30 - (i % 2) * 24, '#d6336c', 18), i * 350));
-      confetti(ev.x, ev.y - 40, 50); sfx.win();
+      confetti(ev.x, ev.y - 40, 50); sfx.win(); npc(`job${ev.jt}done`);
       if ((ev.who || []).includes(net.selfId)) { P.thanks++; for (const it of S.newUnlocks(P)) toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'); S.saveProfile(P); }
     }
     else if (ev.t === 'round') setTimeout(() => { const r = S.ROLES[myRole()]; toast(`New round! Your job: ${r.icon} ${r.name}`); T.key = null; }, 300);
@@ -372,6 +395,7 @@ async function startGame() {
   setInterval(sendPos, 100);
   requestAnimationFrame(frame);
   toast(S.tierOf(P.step) <= 2 ? 'Use the arrow keys to walk to a glowing circle. Then type!' : 'Arrow keys to walk, Enter to jump to the nearest site. Then type!');
+  if (!P.tips.hello) { P.tips.hello = 1; npc('hello', 'walk'); }
 }
 
 let lastTick = performance.now();
@@ -388,7 +412,7 @@ function hostTick() {
 let lastPos = '', lastPosAt = 0;
 function sendPos() {
   if (!net || !net.peers.size) return;
-  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0), me.face, me.act];
+  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0), me.face, me.act];
   const k = m.join(), now = performance.now();
   if (k === lastPos && now - lastPosAt < 1000) return;
   lastPos = k; lastPosAt = now;
@@ -431,19 +455,48 @@ function autoWalk() {
   auto = best;
 }
 
+/** The finished building whose door this player is standing at, as "district:site". */
+function doorAt() {
+  const i = cellOf(me.x, me.y);
+  if (i === undefined || i > st.d) return null;
+  const D = district(i);
+  for (let k = 0; k < 6; k++) {
+    const s = D.sites[k];
+    if (i === st.d && st.have[k] < s.need) continue;
+    if (Math.hypot(me.x - s.x, (me.y - s.y - 48) / 0.6) < ZONE_R) return `${i}:${k}`;
+  }
+  return null;
+}
+function enterBuilding(id) {
+  const [i, k] = id.split(':').map(Number);
+  const m = missionFor(i, k, district(i).sites[k].kind);
+  inside = { id, m, placed: Math.min(m.items.length, P.rooms[id] | 0), pop: 1 };
+  auto = null; held.clear();
+  npc(inside.placed >= m.items.length ? `m_${m.id}_done` : `m_${m.id}`);
+}
+function leaveBuilding() { inside = null; T.key = null; Voice.stop(); }
+
 function finishPrompt(secs) {
-  const boss = T.key === 'boss', p = T.p;
-  const n = P.crane > 0 ? 2 : 1;
-  if (P.crane > 0) P.crane--;
-  const job = T.key.startsWith('j') ? +T.key.slice(1) : 0;
-  net.toHost('done', { site: T.site, clean: T.clean, boss, n, job });
+  const key = T.key, boss = key === 'boss', p = T.p;
+  const job = key.startsWith('j') ? +key.slice(1) : 0;
+  const bricks = !job && !boss; // building work, outdoors or indoors
+  const n = bricks && P.crane > 0 ? 2 : 1;
+  if (n === 2) P.crane--;
+  net.toHost('done', { site: inside ? -1 : T.site, clean: T.clean, boss, n, job });
   sfx.load();
-  if (job) { P.crane += n - 1; floatText(['💦 splash!', '🔧 clank!', '🪜 up!', '🚨 stop!'][T.jobType] || '👍', me.x, me.y - 100, '#2f7de1'); }
+  if (inside) {
+    inside.placed++; inside.pop = 0; P.rooms[inside.id] = inside.placed;
+    if (inside.placed >= inside.m.items.length) {
+      P.thanks++; P.crane += 3;
+      toast(`❤️ ${inside.m.who} says thank you! You earned a crane: 3 double loads.`, 'gold');
+      sfx.win(); npc(`m_${inside.m.id}_done`);
+    }
+  } else if (job) floatText(['💦 splash!', '🔧 clank!', '🪜 up!', '🚨 stop!'][T.jobType] || '👍', me.x, me.y - 100, '#2f7de1');
   else if (boss && st.boss) fx.push({ text: '🧱', x: me.x, y: me.y - 60, vx: (st.boss.x - me.x) * 2.5, vy: (st.boss.y - 80 - me.y + 60) * 2.5, life: 0.4, size: 26 });
   else floatText(n === 2 ? '+2 🧱' : '+1 🧱', me.x, me.y - 100, '#c8553d');
   if (T.clean) {
     P.streak++; P.bestStreak = Math.max(P.bestStreak, P.streak);
-    if (P.streak % 5 === 0 && P.shields < 3) { P.shields++; toast(`🛡️ ${P.streak} clean loads in a row! You earned a shield.`); }
+    if (P.streak % 5 === 0 && P.shields < 3) { P.shields++; toast(`🛡️ ${P.streak} clean in a row! You earned a shield: it forgives your next slip.`); }
   }
   if (p.burst && secs <= p.burst) floatText('⚡ Speed burst!', me.x, me.y - 130, '#e6a700', 24);
   const rankBefore = S.rankOf(P).i, stepBefore = P.step;
@@ -452,42 +505,55 @@ function finishPrompt(secs) {
     toast(`${'⭐'.repeat(res.stars)} Lesson done: ${Math.round(res.acc * 100)}% accurate` + (res.stars === 3 ? '. Crane earned: 3 double loads!' : ''));
     if (res.promoted) {
       const fresh = P.step < S.STAGES.length ? `New keys: ${S.STAGES[P.step].keys.toUpperCase().split('').join(' and ')}` : `New job: ${S.stepName(P.step)}`;
-      setTimeout(() => { toast(`🎉 Promotion! ${fresh}`, 'gold'); confetti(me.x, me.y - 60, 80); sfx.win(); }, 900);
+      setTimeout(() => { toast(`🎉 Promotion! ${fresh}`, 'gold'); confetti(me.x, me.y - 60, 80); sfx.win(); npc('promo'); }, 900);
     }
     if (res.ready) setTimeout(() => toast('You are ready for something new. It unlocks tomorrow: sleep makes fingers smarter!'), 900);
     if (res.demoted) setTimeout(() => toast('Let\'s spend a little more time on the last keys.'), 900);
-    if (res.shiftDone && P.pacing) setTimeout(() => toast('🏁 Today\'s shift is done. Great work! Come back tomorrow for more. You can keep building for fun.', 'gold'), 1800);
+    if (res.shiftDone && P.pacing) setTimeout(() => { toast('🏁 Today\'s shift is done. Great work! Come back tomorrow for more. You can keep building for fun.', 'gold'); npc('shift'); }, 1800);
   }
   for (const it of S.newUnlocks(P)) setTimeout(() => toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'), 1400);
   if (S.rankOf(P).i !== rankBefore) { setTimeout(() => toast(`${S.rankOf(P).icon} You are now a ${S.rankOf(P).name}!`, 'gold'), 2200); sendProfile(); }
   S.saveProfile(P);
-  T.p = null; T.key = stepBefore !== P.step ? null : T.key + '!'; // force a fresh prompt next frame
+  T.p = null; T.key = stepBefore !== P.step ? null : key + '!'; // force a fresh prompt next frame
   me.prog = 0;
 }
 
+/** Decide what, if anything, this player should be typing right now. */
 function updatePrompt() {
-  const job = st.boss ? null : jobAt();
-  const zone = st.boss || job ? -1 : zoneAt();
-  const key = st.boss ? 'boss' : job ? `j${job.id}` : zone >= 0 ? `s${st.d}:${zone}:${myRole()}` : null;
+  let job = null, zone = -1, key;
+  if (inside) key = inside.placed < inside.m.items.length ? `i${inside.id}:${inside.placed}` : null;
+  else {
+    job = st.boss ? null : jobAt();
+    zone = st.boss || job ? -1 : zoneAt();
+    key = st.boss ? 'boss' : job ? `j${job.id}` : zone >= 0 ? `s${st.d}:${zone}:${myRole()}` : null;
+  }
+  doorId = !inside && !key ? doorAt() : null;
   me.act = job ? job.t : -1; curJob = job ? job.id : 0;
+  const idle = inside ? 'All done here. Press Esc to go back outside.'
+    : doorId ? (P.rooms[doorId] >= 6 ? '🚪 Press Enter to visit.' : '🚪 Someone inside needs help! Press Enter to go in.')
+      : 'Walk to a glowing circle with the arrow keys, or press Enter to go to the nearest one.';
+  if (!key && !T.p) $('hint').textContent = idle;
   if (key !== T.key || (key && !T.p)) {
-    const wasSite = T.key && T.key.startsWith('s') && T.site >= 0 && st.have[T.site] >= district(st.d).sites[T.site].need || (T.key && T.key.startsWith('s') && !T.key.startsWith(`s${st.d}:`));
+    const wasSite = T.key && T.key.startsWith('s') && T.site >= 0 && (st.have[T.site] >= district(st.d).sites[T.site].need || !T.key.startsWith(`s${st.d}:`));
     T.key = key; T.site = zone;
     const els = { prompt: $('prompt'), found: $('found') };
     if (!key) {
-      if (wasSite && !held.size) autoWalk(); // this building is done: stroll to the next one
+      if (wasSite && !held.size && !P.tips.built2) { P.tips.built2 = 1; } // first finished building: stay put so the door tip makes sense
+      else if (wasSite && !held.size) autoWalk(); // this building is done: stroll to the next one
       setPrompt(null, els, null);
-      $('hint').textContent = 'Walk to a glowing circle with the arrow keys, or press Enter to go to the nearest one.';
+      $('hint').textContent = idle;
     } else {
-      const role = st.boss || job ? 0 : myRole();
+      const role = st.boss || job || inside ? 0 : myRole();
       T.jobType = job ? job.t : -1;
-      const p = S.genPrompt(P, role, !!st.boss);
+      const p = S.genPrompt(P, role, !!st.boss && !inside);
       setPrompt(p, els, finishPrompt);
-      $('hint').textContent = st.boss ? 'Throw bricks at the Typo Monster!'
-        : job ? JOBS[job.t].hint
-        : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
-          : p.perfect ? 'Perfect run: one slip sends you back to the start.'
-            : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : '';
+      tip('type');
+      $('hint').textContent = inside ? `Type to bring in the next thing for ${inside.m.who}.`
+        : st.boss ? 'Throw bricks at the Typo Monster!'
+          : job ? JOBS[job.t].hint
+            : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
+              : p.perfect ? 'Perfect run: one slip sends you back to the start.'
+                : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : 'Type it to deliver a load of bricks.';
     }
   }
   return zone;
@@ -520,15 +586,16 @@ function updateHud(now) {
   hudAt = now;
   const D = district(st.d);
   const left = D.sites.filter((s, k) => st.have[k] < s.need).length;
-  $('district').textContent = `🏙️ ${D.name} · ${6 - left}/6`;
+  $('district').textContent = `🏙️ ${D.name}: ${6 - left} of 6 built`;
   const r = S.ROLES[myRole()];
-  $('role').textContent = `${r.icon} ${r.name}: ${r.tip}`;
+  $('role').textContent = `Your job: ${r.icon} ${r.name}`;
   $('combo').style.width = Math.min(100, st.combo * 100) + '%';
   $('bossbar').classList.toggle('hidden', !st.boss);
   if (st.boss) { $('bosshp').style.width = st.boss.hp / st.boss.max * 100 + '%'; $('bosstxt').textContent = `TYPO MONSTER · ${Math.ceil(st.boss.left)}s`; }
   const done = Math.min(S.SHIFT_LESSONS, P.day.lessons);
-  $('shift').textContent = (P.pacing ? `Shift ${'●'.repeat(done)}${'○'.repeat(S.SHIFT_LESSONS - done)}` : `Lessons ${P.day.lessons}`) + ` · ${P.lesson.n}/${S.LESSON_LEN}`;
-  $('powers').textContent = `🛡️${P.shields} 🏗️${P.crane}` + (now < bootsUntil ? ' 👟' : '') + ` 🔥${P.streak}`;
+  $('shift').textContent = P.pacing ? `Today ${'⭐'.repeat(done)}${'☆'.repeat(S.SHIFT_LESSONS - done)}` : `Lessons today: ${P.day.lessons}`;
+  const pw = [P.shields ? `🛡️×${P.shields}` : '', P.crane ? `🏗️×${P.crane}` : '', now < bootsUntil ? '👟' : '', P.streak >= 3 ? `🔥${P.streak}` : ''].filter(Boolean).join('  ');
+  $('powers').textContent = pw; $('powers').classList.toggle('hidden', !pw);
   $('crew').textContent = !net.ready ? '🔎 looking for builders…' : `👷 ${1 + liveOthers(now).length} in ${roomLabel}` + (net.isHost && others.size ? ' ★' : '');
   $('btnSound').textContent = P.sound ? '🔊' : '🔇';
 }
@@ -550,8 +617,9 @@ function frame(now) {
   lastFrame = now;
 
   // walking
-  let dx = (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0);
-  let dy = (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
+  let dx = inside ? 0 : (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0);
+  let dy = inside ? 0 : (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
+  if (inside) { auto = null; inside.pop += dt; }
   if (auto && !dx && !dy) {
     const ax = auto.x - me.x, ay = auto.y - me.y, d = Math.hypot(ax, ay);
     if (d < (auto.job ? 40 : 8)) auto = null; else { dx = ax / d; dy = ay / d; }
@@ -559,11 +627,19 @@ function frame(now) {
   me.walk = !!(dx || dy);
   if (me.walk) {
     const len = Math.hypot(dx, dy), sp = (now < bootsUntil ? 360 : 240) * (me.stumble > 0 ? 0.3 : 1) * (me.boat ? 0.6 : 1);
-    me.x += dx / len * sp * dt; me.y += dy / len * sp * dt;
+    const nx = me.x + dx / len * sp * dt, ny = me.y + dy / len * sp * dt;
+    if (walkable(nx, ny, st.d)) { me.x = nx; me.y = ny; }
+    else if (walkable(nx, me.y, st.d)) me.x = nx;
+    else if (walkable(me.x, ny, st.d)) me.y = ny;
+    else auto = null;
+    if (!walkable(nx, ny, st.d) && now - nagAt > 12000) { nagAt = now; toast('🔒 That land is locked. Finish this neighborhood to open more of the city.'); npc('locked'); }
     if (Math.abs(dx) > 0.1) me.face = dx > 0 ? 1 : -1;
   }
   me.stumble = Math.max(0, me.stumble - dt);
+  if (!walkable(me.x, me.y, st.d)) { const D = district(st.d); me.x = D.cx; me.y = D.cy + 45; } // the city changed under us
+  const wasBoat = me.boat;
   me.boat = onRiver(me.x, me.y, st.d);
+  if (me.boat && !wasBoat) tip('river');
   if (auto?.job) { const j = st.jobs.find(x => x.id === auto.job); if (j) { auto.x = j.px; auto.y = j.py; } else auto = null; }
   for (const o of others.values()) {
     o.x += (o.tx - o.x) * Math.min(1, dt * 12); o.y += (o.ty - o.y) * Math.min(1, dt * 12);
@@ -587,8 +663,14 @@ function frame(now) {
   }
   cam.x += (me.x - cam.x) * Math.min(1, dt * 6);
   cam.y += (me.y - 50 + $('panel').offsetHeight / 2 - cam.y) * Math.min(1, dt * 6);
+  if (inside) {
+    drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, drawMe: (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: false }, x, y, now / 1000) });
+    updateHud(now);
+    return;
+  }
   draw(ctx, {
-    w: vw, h: vh, cam, st, t: now / 1000, me, others: liveOthers(now),
+    w: vw, h: vh, cam, st, t: now / 1000, me, others: liveOthers(now).filter(o => !o.inside),
+    door: doorId, roomDone: id => P.rooms[id] >= 6,
     zone, job: curJob, weak: st.boss ? S.weakKeys(P, 4) : [], bossHit, fx,
   });
   updateHud(now);
@@ -600,7 +682,8 @@ addEventListener('keydown', e => {
   if (mode === 'start' || (mode === 'game' && document.querySelector('.screen:not(.hidden)'))) return;
   if (mode === 'place') { if (e.key.length === 1) { e.preventDefault(); typeChar(e.key); } return; }
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }
-  if (e.key === 'Enter') { autoWalk(); e.preventDefault(); return; }
+  if (e.key === 'Escape' && inside) { leaveBuilding(); e.preventDefault(); return; }
+  if (e.key === 'Enter') { if (!inside) doorId && !T.p ? enterBuilding(doorId) : autoWalk(); e.preventDefault(); return; }
   if (e.key === 'Tab' || e.key === 'Backspace') { e.preventDefault(); return; }
   if (e.key.length === 1) { e.preventDefault(); typeChar(e.key); }
 });

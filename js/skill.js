@@ -80,7 +80,7 @@ export function loadProfile() {
   p = Object.assign({
     name: '', color: 0, step: 0, placed: false, credits: 0, badRun: 0,
     lesson: { n: 0, hit: 0, miss: 0 }, keys: {}, streak: 0, bestStreak: 0,
-    stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, shields: 0, crane: 0,
+    stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, rooms: {}, tips: {}, shields: 0, crane: 0,
     wear: { hat: 'h0', tool: 't0', pet: 'p0', ride: 'r0' }, seen: ['h0', 't0', 'p0', 'r0'],
     day: { date: '', lessons: 0, promoted: false }, pacing: true, guide: true, sound: true, vol: 0.7,
   }, p || {});

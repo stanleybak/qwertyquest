@@ -54,6 +54,15 @@ export function onRiver(x, y, d) {
   return !(i < d && Math.abs(x - D.cx) < 70);
 }
 
+export const cellOf = (x, y) => cellIdx.get(`${Math.round(x / CELL_W)},${Math.round(y / CELL_H)}`);
+let ensured = 0;
+/** Only opened districts can be walked on. The rest of the land is locked. */
+export function walkable(x, y, d) {
+  for (; ensured <= d + 1; ensured++) district(ensured);
+  const i = cellOf(x, y);
+  return i !== undefined && i <= d;
+}
+
 // City problems that pop up and need typing to fix.
 export const JOBS = [
   { name: 'fire', icon: '🔥', tool: '🧯', call: 'Fire! Grab a hose and help put it out.', done: 'put out the fire', hint: 'Spray the fire!' },

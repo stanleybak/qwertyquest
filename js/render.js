@@ -7,6 +7,7 @@ const FLOOR_H = 28;
 
 function emoji(ctx, e, x, y, size) {
   if (!e) return;
+  ctx.fillStyle = '#000'; // color emoji take their opacity from the fill style
   ctx.font = `${size}px serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(e, x, y);
@@ -54,6 +55,19 @@ function drawGround(ctx, v) {
     }
     ctx.fillStyle = '#0005'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(D.name.toUpperCase(), x, y - CELL_H / 2 + 34);
+  }
+  // the next district: visible, but locked
+  const N = district(st.d + 1);
+  if (vis(N)) {
+    const x = N.cx - cam.x + w / 2, y = N.cy - cam.y + h / 2;
+    ctx.fillStyle = '#2f6b2f55';
+    rr(ctx, x - CELL_W / 2 + 14, y - CELL_H / 2 + 14, CELL_W - 28, CELL_H - 28, 36); ctx.fill();
+    ctx.strokeStyle = '#8d6e4a'; ctx.lineWidth = 5; ctx.setLineDash([4, 14]); ctx.stroke(); ctx.setLineDash([]);
+    emoji(ctx, '🔒', x, y - 26, 64);
+    ctx.fillStyle = '#fff'; ctx.font = '800 20px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(N.name, x, y + 30);
+    ctx.font = '600 14px system-ui';
+    ctx.fillText(`Finish ${district(st.d).name} to open`, x, y + 54);
   }
   // trees on the open land, the same on every screen
   const G = 150;
@@ -126,7 +140,7 @@ function drawZone(ctx, x, y, on, t) {
 }
 
 /** One builder. p: {x,y,walk,stumble,prog,face,name,color,hat,tool,pet,ride,rank,me} */
-function drawPlayer(ctx, p, x, y, t) {
+export function drawPlayer(ctx, p, x, y, t) {
   const bob = p.walk ? Math.abs(Math.sin(t * 12 + x * 0.01)) * 5 : 0;
   const wob = p.stumble > 0 ? Math.sin(p.stumble * 40) * 0.35 * Math.min(1, p.stumble * 3) : 0;
   ctx.fillStyle = '#0003';
@@ -248,7 +262,17 @@ export function draw(ctx, v) {
     D.sites.forEach((s, k) => {
       const have = i < st.d ? s.need : st.have[k];
       if (i === st.d && have < s.need) drawZone(ctx, sx(s.x), sy(s.y + 48), v.zone === k, t);
-      things.push({ y: s.y, f: () => drawBuilding(ctx, s, have, sx(s.x), sy(s.y), t, i === st.d) });
+      const id = `${i}:${k}`;
+      if (have >= s.need) drawZone(ctx, sx(s.x), sy(s.y + 48), v.door === id, t);
+      things.push({ y: s.y, f: () => {
+        drawBuilding(ctx, s, have, sx(s.x), sy(s.y), t, i === st.d);
+        if (have >= s.need) { // a neighbor inside needs help, or has been helped
+          const fin = v.roomDone(id), by = sy(s.y) - s.floors * FLOOR_H - 62 + (fin ? 0 : Math.sin(t * 4) * 4);
+          if (!fin) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(sx(s.x), by, 15, 0, 7); ctx.fill(); }
+          emoji(ctx, fin ? '⭐' : '❗', sx(s.x), by + 1, fin ? 24 : 18);
+          emoji(ctx, '🚪', sx(s.x) + s.w / 2 - 18, sy(s.y) - 14, 0.1); // warm the glyph cache
+        }
+      } });
     });
   }
   for (const it of st.items) {
