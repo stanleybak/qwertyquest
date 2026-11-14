@@ -124,9 +124,14 @@ export function loadWorlds() {
 }
 export function saveWorld(world, st) {
   const all = loadWorlds();
-  all[world.id] = { key: world.key, name: world.name, d: st.d, have: st.have, total: st.total, at: Date.now() };
+  all[world.id] = { key: world.key, name: world.name, apart: !!world.apart, d: st.d, have: st.have, total: st.total, at: Date.now() };
   const ids = Object.keys(all).sort((a, b) => all[b].at - all[a].at);
   for (const id of ids.slice(8)) delete all[id]; // keep the eight most recent
+  try { localStorage.setItem(SAVES, JSON.stringify(all)); } catch { /* ignore */ }
+}
+export function dropWorld(id) {
+  const all = loadWorlds();
+  delete all[id];
   try { localStorage.setItem(SAVES, JSON.stringify(all)); } catch { /* ignore */ }
 }
 /** A city saved by an older version of the game, under the room it was played in. */
@@ -256,9 +261,11 @@ export class Host {
     if (!w || typeof w.total !== 'number' || !Number.isInteger(w.d) || w.d < 0 || !Array.isArray(w.have) || w.have.length !== 6) return;
     if (w.d < st.d) return;
     const sites = district(w.d).sites, theirs = w.have.map((n, k) => Math.min(sites[k].need, Math.max(0, n | 0)));
+    const before = st.d + ':' + st.have.join();
     if (w.d > st.d) { st.d = w.d; st.have = theirs; st.boss = null; st.items = []; st.jobs = []; }
     else st.have = st.have.map((n, k) => Math.max(n, theirs[k]));
     st.total = Math.max(st.total, w.total);
+    if (before !== st.d + ':' + st.have.join()) this.event('merged'); // the city just grew
     if (sites.every((s, k) => st.have[k] >= s.need)) { // together they had finished it
       this.event('district', { d: st.d, name: district(st.d).name });
       st.d++; st.have = [0, 0, 0, 0, 0, 0]; st.items = []; st.jobs = []; st.boss = null;

@@ -1,7 +1,7 @@
 // QwertyQuest: screens, input, the typing engine, and the frame loop.
 import * as S from './skill.js';
 import { Net, findRoom } from './net.js';
-import { Host, newState, loadWorlds, saveWorld, legacyWorld, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
+import { Host, newState, loadWorlds, saveWorld, dropWorld, legacyWorld, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
 import * as Voice from './voice.js';
 import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
@@ -542,10 +542,30 @@ const handlers = {
     paintLobby();
   },
   onWelcome(world) {
-    // Let in. If this device was hosting its own copy of the same city, keep that copy to offer for merging.
-    if (host && mode === 'game') saveWorld(world, st);
+    // Let in. Whatever this device had built on its own is kept as its copy of
+    // the new city, and offered to the host on the first state (see onState),
+    // so the two cities become one with the best of both.
+    world.apart = pickedApart;
+    const all = loadWorlds();
+    const mine = host && mode === 'game' ? { ...st, id: leaving } : bring && all[bring] ? { ...all[bring], id: bring } : null;
+    const other = mine && mine.id && mine.id !== world.id; // a different city of our own is being merged in
+    if (mine && (!other || !all[world.id])) saveWorld(world, mine);
+    if (other) {
+      dropWorld(mine.id); // it lives on inside the joined city
+      P.help[world.id] = { ...P.help[mine.id], ...P.help[world.id] }; delete P.help[mine.id];
+      if (P.pos?.w === mine.id) P.pos.w = world.id; // same streets, so the same spot
+      toast(`🏗️ Your city is joining ${world.name}.`, 'gold');
+    }
+    bring = leaving = '';
     host = null; gotState = false;
     if (mode === 'lobby') { lobbyNote = ''; paintLobby(); }
+  },
+  // Hosting a city while another one is open on the same network: unless this
+  // player chose to stay apart, fold into the other and bring the progress along.
+  onFold(from, w) {
+    if (mode !== 'game' || w.ver !== VERSION) return;
+    leaving = net.world.id; pickedApart = false;
+    net.ask(from, '', w.name);
   },
   onDenied() { lobbyNote = 'They can\'t let you in right now.'; paintLobby(); },
   onAsk(id, name) {
@@ -555,7 +575,11 @@ const handlers = {
   },
   onPeers(id, joined) {
     if (joined) { other(id); net.sendTo(id, 'me', profileMsg()); }
-    else { others.delete(id); if (asks.delete(id)) paintAsks(); }
+    else {
+      const name = others.get(id)?.name;
+      if (name && mode === 'game') toast(`👋 ${name} left the city.`);
+      others.delete(id); if (asks.delete(id)) paintAsks();
+    }
     if (net.isHost) st.order = net.order;
   },
   onMsg(kind, data, from) {
@@ -568,7 +592,12 @@ const handlers = {
       o.boat = !!(data[3] & 4); o.inside = !!(data[3] & 8); o.act = data[5] | 0;
       if (!o.seen) { o.x = o.tx; o.y = o.ty; o.seen = true; }
       o.at = performance.now();
-    } else if (kind === 'me') applyProfile(other(from), data || {});
+    } else if (kind === 'me') {
+      const o = other(from), isNew = !o.name;
+      applyProfile(o, data || {});
+      // announce newcomers, but not everyone who was already here when this player walked in
+      if (isNew && o.name && mode === 'game' && performance.now() - enteredAt > 4000) toast(`👋 ${o.name} joined the city!`, 'gold');
+    }
     else if (kind === 'grant') grant(data.t | 0);
     else if (!host) return;
     else if (kind === 'done') host.done(from, data || {});
@@ -591,6 +620,7 @@ function handleEvents() {
     } else if (ev.t === 'gold') { toast('⭐ Team combo! Bonus bricks for every site.', 'gold'); if (!busy()) { sfx.win(); npc('combo'); } }
     // City problems and the monster never interrupt: they are announced when the player walks up to them (see greet()).
     else if (ev.t === 'boss' || ev.t === 'job') { /* quiet */ }
+    else if (ev.t === 'merged') toast('🏗️ Two cities joined into one. The best of both was kept!', 'gold');
     else if (ev.t === 'bossWin') { if (engaged === 'boss' || !busy()) { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); npc('bosswin'); } }
     else if (ev.t === 'bossFlee') { if (!busy()) { toast('The Typo Monster kicked a brick loose and wandered off.'); npc('bossflee'); } }
     else if (ev.t === 'jobGone') { if ((!busy() || engaged?.startsWith('j')) && ev.jt === 3) { toast('The brick thief got away this time.'); npc('job3gone'); } }
@@ -612,7 +642,10 @@ const myRole = () => (st.roles && st.roles[net?.selfId]) ?? 0;
 // After the start screen the device listens for cities on the network, then
 // either goes straight into the obvious one or shows a menu.
 const asks = new Map(); // host only: peer id -> name of someone waiting to be let in
-let lobbyNote = '', lobbyReady = false, timersOn = false;
+let lobbyNote = '', lobbyReady = false, timersOn = false, enteredAt = 0;
+let bring = '', leaving = '';   // a city of this device's own whose progress goes along into the city being joined
+let knocking = false;           // waiting for someone in the city to say yes
+let pickedApart = false;        // this player chose a city from the menu, so it is never merged into another automatically
 const rid = () => [...crypto.getRandomValues(new Uint8Array(9))].map(b => b.toString(36).padStart(2, '0')).join('');
 const openCities = () => [...net.worlds.values()].filter(w => net.peers.has(w.host));
 
@@ -634,24 +667,32 @@ async function startGame() {
     lobbyReady = true;
     let menu = false;
     try { menu = !!sessionStorage.getItem('qq.menu'); sessionStorage.removeItem('qq.menu'); } catch { /* ignore */ }
-    const saved = loadWorlds(), ids = Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at), open = openCities();
-    const known = open.find(w => saved[w.id] && w.ver === VERSION);
+    const saved = loadWorlds(), ids = Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at);
+    const open = openCities().filter(w => w.ver === VERSION), recent = saved[ids[0]];
     if (mode !== 'lobby' || net.asking) return;
-    if (!menu && known) return joinCity(known);                  // our own city is already open here: walk right in
-    if (!menu && !open.length && ids.length <= 1) return hostCity(ids[0]); // nothing to choose between
-    if (open.some(w => w.ver !== VERSION)) versionClash();
+    if (openCities().length > open.length) versionClash();
+    if (!menu) {
+      // No questions unless there is a real choice to make.
+      const known = open.find(w => saved[w.id]);
+      if (known) return joinCity(known, false);                 // this device's own city is open here: walk right in
+      if (recent?.apart || !open.length) return hostCity(ids[0], !!recent?.apart); // carry on with its own city
+      if (open.length === 1 && !open[0].apart) { bring = ids[0] || ''; return joinCity(open[0], false); } // one city here: join it, and merge
+    }
     paintLobby();
   }, net.room ? 3500 : 0);
 }
-function joinCity(w) {
-  lobbyNote = '';
-  net.ask(w.host, loadWorlds()[w.id]?.key || '', w.name);
+/** Ask to enter a city. picked: chosen from the menu, so someone there says yes first and it stays a separate city. */
+function joinCity(w, picked) {
+  const mine = loadWorlds()[w.id];
+  lobbyNote = ''; pickedApart = picked || !!mine?.apart; knocking = picked && !mine;
+  net.ask(w.host, mine?.key || '', w.name, picked);
   paintLobby();
 }
 /** Host a saved city, or a brand new one when `id` is empty. */
-function hostCity(id) {
+function hostCity(id, apart) {
   const saved = id && loadWorlds()[id];
-  const world = saved ? { id, key: saved.key, name: saved.name } : { id: rid(), key: rid(), name: `${P.name}'s city` };
+  const world = saved ? { id, key: saved.key, name: saved.name, apart } : { id: rid(), key: rid(), name: `${P.name}'s city`, apart };
+  pickedApart = !!apart;
   st = newState();
   if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total });
   host = new Host(st);
@@ -662,8 +703,10 @@ function paintLobby() {
   const el = $('lobbyBody'); el.innerHTML = '';
   const add = (tag, text, cls) => { const x = document.createElement(tag); x.textContent = text; if (cls) x.className = cls; el.appendChild(x); return x; };
   if (net.asking || (net.world && mode === 'lobby')) {
+    const name = net.asking ? net.asking.name : net.world.name;
+    if (!knocking) { add('h2', '🏙️ Joining…'); add('p', `Walking into ${name}.`, 'sub'); return; }
     add('h2', `🚪 Knock, knock!`);
-    add('p', `Asking to join ${net.asking ? net.asking.name : net.world.name}…`, 'sub');
+    add('p', `Asking to join ${name}…`, 'sub');
     add('p', 'Someone there needs to press ✔ Let in.', 'small');
     if (net.asking) add('button', 'Never mind', '').onclick = () => { net.cancelAsk(); paintLobby(); };
     return;
@@ -676,15 +719,15 @@ function paintLobby() {
     const b = add('button', '', 'city'), same = w.ver === VERSION;
     b.append(`🏙️ ${w.name}`, Object.assign(document.createElement('small'), { textContent: same ? `${w.n} building there now · ask to join` : 'getting an update… one moment' }));
     b.disabled = !same; // everyone in a city runs the same version
-    if (same) b.onclick = () => joinCity(w); else versionClash();
+    if (same) b.onclick = () => joinCity(w, true); else versionClash();
   }
   for (const id of Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at).slice(0, 4)) {
     if (open.some(w => w.id === id)) continue;
     const b = add('button', '', 'city');
     b.append(`▶ ${saved[id].name}`, Object.assign(document.createElement('small'), { textContent: `saved here · ${saved[id].d} neighborhood${saved[id].d === 1 ? '' : 's'} finished` }));
-    b.onclick = () => hostCity(id);
+    b.onclick = () => hostCity(id, true);
   }
-  add('button', '➕ Start a brand new city', 'city').onclick = () => hostCity('');
+  add('button', '➕ Start a brand new city', 'city').onclick = () => hostCity('', true);
 }
 /** Host: people waiting to be let in, shown under the top-right buttons. */
 function paintAsks() {
@@ -752,7 +795,7 @@ setInterval(() => {
 }, 1000);
 
 function enterCity() {
-  mode = 'game';
+  mode = 'game'; enteredAt = performance.now();
   $('lobby').classList.add('hidden');
   $('hud').classList.remove('hidden'); $('panel').classList.remove('hidden');
   saveWorld(net.world, st); savedTotal = st.total; // remember this city (and its key) from the first moment
@@ -779,7 +822,7 @@ function hostTick() {
   const now = performance.now(), dt = Math.min(2, (now - lastTick) / 1000);
   lastTick = now;
   if (!host || !net.isHost) return;
-  st.order = net.order; st.w = net.world.id; st.wn = net.world.name; st.ver = VERSION;
+  st.order = net.order; st.w = net.world.id; st.wn = net.world.name; st.ver = VERSION; st.apart = !!net.world.apart;
   host.tick(dt);
   net.broadcast('state', st);
   handleEvents();

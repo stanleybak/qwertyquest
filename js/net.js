@@ -194,9 +194,9 @@ export class Net {
     this._claim();
   }
   /** Ask the host of a city to let this device in. `key` gets a past member in without anyone having to say yes. */
-  ask(hostId, key, name) {
+  ask(hostId, key, name, pick = false) {
     this.cancelAsk();
-    const knock = () => this._send('ask', { key: key || '', name: this.h.myName(), ver: this.h.myVer() }, hostId);
+    const knock = () => this._send('ask', { key: key || '', name: this.h.myName(), ver: this.h.myVer(), pick }, hostId);
     this.asking = { host: hostId, name, timer: setInterval(knock, 2000) };
     knock();
   }
@@ -216,8 +216,14 @@ export class Net {
     const now = performance.now();
     if (kind === 'state') {
       if (!data || typeof data.w !== 'string') return;
-      this.worlds.set(from, { id: data.w, name: String(data.wn || 'A city').slice(0, 24), host: from, n: (data.order || []).length, d: data.d | 0, ver: data.ver, at: now });
-      if (!this.world || data.w !== this.world.id) return; // some other city
+      this.worlds.set(from, { id: data.w, name: String(data.wn || 'A city').slice(0, 24), host: from, n: (data.order || []).length, d: data.d | 0, ver: data.ver, apart: !!data.apart, at: now });
+      if (!this.world) return;
+      if (data.w !== this.world.id) { // some other city
+        // Two cities on one network become one, unless a player chose to keep theirs apart.
+        // The one whose host has the lower id stays. A city kept apart is left alone, both ways.
+        if (this.isHost && !this.world.apart && !data.apart && !this.asking && from < this.selfId) this.h.onFold(from, this.worlds.get(from));
+        return;
+      }
       if (this.isHost) {
         // The same city has two hosts (both carried on after losing each other).
         // The lower id keeps it; the other folds in and offers what it built.
@@ -235,14 +241,15 @@ export class Net {
     if (kind === 'ask') {
       if (!this.isHost) return;
       if (!data || data.ver !== this.h.myVer()) { this.deny(from); this.h.onClash(); return; } // a city runs one version of the game
-      if (data && data.key && data.key === this.world.key) this.admit(from); // has been here before
+      // Walk-ins are the normal case. Only someone who picked this city from a menu of several waits for a yes.
+      if (!data.pick || (data.key && data.key === this.world.key)) this.admit(from);
       else this.h.onAsk(from, String((data && data.name) || 'Someone').slice(0, 12));
       return;
     }
     if (kind === 'welcome') {
       if (this.asking?.host !== from || !data || typeof data.id !== 'string') return;
       this.cancelAsk();
-      this.world = { id: data.id, key: String(data.key || ''), name: String(data.name || 'A city').slice(0, 24) };
+      this.world = { id: data.id, key: String(data.key || ''), name: String(data.name || 'A city').slice(0, 24), apart: false };
       this.hostId = from; this.heard = now;
       this._setOrder([from, this.selfId]);
       this.h.onWelcome(this.world);

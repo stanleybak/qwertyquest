@@ -27,8 +27,8 @@ def browser():
     return webdriver.Chrome(options=o)
 
 
-def start(d, name, first=True):
-    d.get(f"{URL}#lan={tag}")
+def start(d, name, first=True, room=""):
+    d.get(f"{URL}#lan={tag}{room}")
     if not first:
         d.refresh()  # same address as before, so the browser would not reload by itself
     time.sleep(1)
@@ -59,85 +59,94 @@ def logs(d, who):
             print("LOG", who, l["level"], l["message"][:240])
 
 
-a, b = browser(), browser()
+def toasts(d):
+    return d.find_element(By.ID, "toasts").text.replace("\n", " | ")
+
+
+def saved(d):
+    return q(d, "return Object.values(JSON.parse(localStorage.getItem('qq.worlds')) || {}).map(w => w.name + (w.apart ? ' (apart)' : ''))")
+
+
+a, b, c = browser(), browser(), browser()
 start(a, "Ann")
 time.sleep(6)
 print("1 Ann alone, straight in:", info(a))
-
-start(b, "Bob")
-time.sleep(5.5)
-print("2 Bob sees a menu:", lobby(b))
-b.save_screenshot(str(OUT / "lobby_menu.png"))
-b.find_element(By.CSS_SELECTOR, "#lobbyBody button.city").click()
-time.sleep(1.5)
-print("3 Bob waits:", lobby(b))
-print("  Ann is asked:", a.find_element(By.ID, "asks").text.replace("\n", " | "))
-a.save_screenshot(str(OUT / "host_ask.png"))
-b.save_screenshot(str(OUT / "knock.png"))
-a.find_elements(By.CSS_SELECTOR, "#asks button")[1].click()  # not now
-time.sleep(1.5)
-print("4 after 'Not now':", lobby(b))
-b.find_element(By.CSS_SELECTOR, "#lobbyBody button.city").click()
-time.sleep(2.5)
-a.find_element(By.CSS_SELECTOR, "#asks button.yes").click()
-time.sleep(2.5)
-print("5 let in. Ann:", info(a))
-print("          Bob:", info(b))
-
-# Ann builds a little, then Bob reloads: he holds the key, so he walks straight back in
 q(a, "const q=window.__qq; for (let i=0;i<3;i++) q.host.done(q.net.selfId, {site:0, clean:true, n:1});")
-time.sleep(5)
-start(b, "Bob", first=False)
-time.sleep(7)
-print("6 Bob reloaded, back in without asking:", info(b), "| Ann asked again?", repr(a.find_element(By.ID, "asks").text))
 
-# Ann leaves; Bob takes over the same city
-a.quit()
-time.sleep(7)
-print("7 Ann gone, Bob keeps the city:", info(b))
-q(b, "const q=window.__qq; for (let i=0;i<2;i++) q.host.done(q.net.selfId, {site:1, clean:true, n:1});")
-time.sleep(5)
+# Bob has never played: one city is open, so he walks in with no menu and no asking
+start(b, "Bob")
+time.sleep(8)
+print("2 Bob walks in:", info(b), "| asked Ann?", repr(a.find_element(By.ID, "asks").text), "| Ann told:", toasts(a))
 
-# Cy has an older copy of the same city with different progress, and opens it alone on another "network"
-c = browser()
+# Cy has a city of his own from another day: he walks in too, and it is merged
+c.get(f"{URL}#lan={tag}")
+q(c, "localStorage.setItem('qq.worlds', JSON.stringify({old1: {key:'k', name:\"Cy's city\", d:0, have:[0,0,4,0,0,0], total:4, at:Date.now()}}))")
 start(c, "Cy")
-time.sleep(5.5)
-print("8 Cy (a stranger) sees:", lobby(c))
-c.find_elements(By.CSS_SELECTOR, "#lobbyBody button.city")[-1].click()  # start a brand new city
-time.sleep(2)
-print("  Cy in his own new city:", info(c), "| Bob still:", info(b))
-# leave the city from the settings panel: the menu must come back
+time.sleep(9)
+print("3 Cy walks in with his own city (building 3 at 4):", info(c))
+print("  Ann's city after the merge:", info(a), "| Cy's saved cities:", saved(c))
+
+# Bob reloads: straight back in
+start(b, "Bob", first=False)
+time.sleep(8)
+print("4 Bob reloaded:", info(b))
+
+# Ann (the host) leaves; the others keep the city
+a.quit()
+time.sleep(8)
+print("5 Ann gone. Bob:", info(b))
+print("            Cy:", info(c))
+
+# Cy leaves the city from the settings panel and starts a brand new one: a deliberate, separate city
 c.find_element(By.ID, "btnAdult").click()
 time.sleep(0.3)
 c.find_element(By.ID, "aLeave").click()
 time.sleep(1.5)
 c.find_element(By.ID, "go").click()
 time.sleep(5.5)
-print("9 Cy left his city, menu again:", lobby(c))
-c.save_screenshot(str(OUT / "lobby_two.png"))
+print("6 Cy chose to leave, so he gets the menu:", lobby(c))
+c.save_screenshot(str(OUT / "lobby_menu.png"))
+c.find_elements(By.CSS_SELECTOR, "#lobbyBody button.city")[-1].click()
+time.sleep(8)
+print("  Cy's new city stays apart:", info(c), "| Bob:", info(b), "| saved:", saved(c))
 
-# best of both: a member's saved copy with a taller building 2 is offered on joining
-world = q(b, "return JSON.stringify(window.__qq.net.world)")
-q(c, "const w=%s; const all=JSON.parse(localStorage.getItem('qq.worlds')) || {}; all[w.id]={key:w.key,name:w.name,d:0,have:[0,0,4,0,0,0],total:4,at:Date.now()}; localStorage.setItem('qq.worlds', JSON.stringify(all));" % world)
-start(c, "Cy", first=False)
-time.sleep(9)
-print("10 Cy holds an old copy (building 3 at 4): merged. Bob:", info(b))
-print("                                                   Cy:", info(c))
-logs(b, "B")
-logs(c, "C")
-b.quit()
-c.quit()
-
-# a device running another version of the game is turned away without bothering the host
-a, b = browser(), browser()
-tag = tag + "v"
-start(a, "Ann")
-time.sleep(6)
-start(b, "Bob")
+# Dee arrives: two cities are open, so she chooses, and choosing means knocking
+d4 = browser()
+start(d4, "Dee")
 time.sleep(5.5)
-host_id = q(a, "return window.__qq.net.selfId")
-q(b, "window.__qq.net._send('ask', {key:'', name:'Old Bob', ver:'some-older-version'}, '%s')" % host_id)
+print("7 Dee sees two cities:", lobby(d4))
+d4.find_element(By.CSS_SELECTOR, "#lobbyBody button.city").click()
+time.sleep(2)
+print("  Dee waits:", lobby(d4))
+hostb = b if "wants to join" in b.find_element(By.ID, "asks").text else c
+print("  host is asked:", hostb.find_element(By.ID, "asks").text.replace("\n", " | "))
+hostb.save_screenshot(str(OUT / "host_ask.png"))
+hostb.find_element(By.CSS_SELECTOR, "#asks button.yes").click()
+time.sleep(3)
+print("  let in:", info(d4))
+for who, d in (("B", b), ("C", c), ("D", d4)):
+    logs(d, who)
+    d.quit()
+
+# two devices start at the same moment: each opens a city, then the two fold into one
+a, b = browser(), browser()
+start(a, "Ann", room="s")
+start(b, "Bob", room="s")
+time.sleep(6)
+q(a, "const q=window.__qq; if (q.host) q.host.done(q.net.selfId, {site:0, clean:true, n:1});")
+q(b, "const q=window.__qq; if (q.host) q.host.done(q.net.selfId, {site:1, clean:true, n:1});")
+time.sleep(9)
+print("8 started together. Ann:", info(a))
+print("                    Bob:", info(b))
+
+# a device running another version of the game is turned away
+other, host_d = (b, a) if q(a, "return window.__qq.net.isHost") else (a, b)
+host_id = q(host_d, "return window.__qq.net.selfId")
+n0 = q(host_d, "return window.__qq.net.order.length")
+q(other, "window.__qq.net._send('ask', {key:'', name:'Old Bob', ver:'some-older-version'}, '%s')" % host_id)
 time.sleep(1.5)
-print("11 ask from another version: host shown a card?", repr(a.find_element(By.ID, "asks").text), "| members:", q(a, "return window.__qq.net.order.length"))
+print("9 ask from another version: members before/after:", n0, q(host_d, "return window.__qq.net.order.length"))
+logs(a, "A")
+logs(b, "B")
 a.quit()
 b.quit()
