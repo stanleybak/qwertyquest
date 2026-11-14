@@ -76,6 +76,13 @@ export function movesLeft(mz, c) {
 export const runX = i => 320 + i * 280; // where obstacle i stands; the goal is at runX(6)
 export const runStop = placed => runX(Math.min(6, placed)) - 78;
 
+/** The order of the list in a fetch game. Same for everyone in the same building. */
+export function orderSeq(id) {
+  const r = rng(seedOf(id) + 7), seq = [0, 1, 2, 3, 4, 5];
+  for (let i = 5; i > 0; i--) { const j = (r() * (i + 1)) | 0; [seq[i], seq[j]] = [seq[j], seq[i]]; }
+  return seq;
+}
+
 /** Fresh state for the game in a building. `placed` is saved progress, 0 to 6. */
 export function newGame(m, id, placed) {
   const g = { path: [] };
@@ -83,11 +90,7 @@ export function newGame(m, id, placed) {
     g.mz = makeMaze(id); g.cell = placed >= 6 ? g.mz.goal : 0;
     g.px = g.cell % MW; g.py = (g.cell / MW) | 0;
   } else if (m.game === 'run') g.rx = runStop(placed) - (placed ? 0 : 170);
-  else if (m.game === 'order') {
-    const r = rng(seedOf(id) + 7);
-    g.seq = [0, 1, 2, 3, 4, 5]; g.labels = {};
-    for (let i = 5; i > 0; i--) { const j = (r() * (i + 1)) | 0; [g.seq[i], g.seq[j]] = [g.seq[j], g.seq[i]]; }
-  }
+  else if (m.game === 'order') { g.seq = orderSeq(id); g.labels = {}; }
   return g;
 }
 
@@ -188,17 +191,19 @@ function drawOrder(ctx, v, F) {
   ctx.fillText('LIST', tx + 12, ty + 26);
   g.seq.forEach((it, k) => {
     const x = tx + 76 + k * 44, y = ty + 25;
-    if (k === v.placed) { ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, 20, 0, 7); ctx.stroke(); }
-    ctx.globalAlpha = k < v.placed ? 0.3 : 1;
+    const got = v.mask >> it & 1, theirs = v.mates.find(o => o.want === it);
+    if (it === v.want) { ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(x, y, 20, 0, 7); ctx.stroke(); } // the one for this player
+    else if (theirs && !got) { ctx.strokeStyle = v.colorOf(theirs); ctx.lineWidth = 3; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.arc(x, y, 20, 0, 7); ctx.stroke(); ctx.setLineDash([]); } // someone else is on it
+    ctx.globalAlpha = got ? 0.3 : 1;
     emoji(ctx, m.items[it], x, y + 1, 26);
     ctx.globalAlpha = 1;
-    if (k < v.placed) emoji(ctx, '✅', x + 10, y + 10, 14);
+    if (got) emoji(ctx, '✅', x + 10, y + 10, 14);
   });
   // the shelf
   const shelfY = F.y0 + F.H * 0.5;
   ctx.fillStyle = '#0003'; ctx.fillRect(F.x0 + F.W * 0.3, shelfY, F.W * 0.64, 8);
   for (let i = 0; i < 6; i++) {
-    if (g.seq.indexOf(i) < v.placed) continue;
+    if (v.mask >> i & 1) continue;
     const hot = v.opts.includes(i);
     emoji(ctx, m.items[i], R.fx(0.36 + i * 0.105), shelfY - 26 - (hot ? Math.abs(Math.sin(t * 4 + i)) * 6 : 0), 46);
   }
@@ -235,7 +240,7 @@ function drawRescue(ctx, v, F) {
 /**
  * Draw a building's game.
  * v: { w, h, ph, t, m, g, placed, pop, opts (ids of the choices on offer), job, out, nearF, x, y, drawMe(x, y),
- *      mates (others in this building, with ix, iy), drawMate(o, x, y) }
+ *      mates (others in this building, with ix, iy, want), drawMate(o, x, y), mask (slots done), want (this player's slot), colorOf(o) }
  */
 export function drawGame(ctx, v) {
   ctx.fillStyle = '#2b2340'; ctx.fillRect(0, 0, v.w, v.h);

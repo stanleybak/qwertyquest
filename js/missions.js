@@ -72,7 +72,8 @@ export function nearSpot(room) {
 
 /**
  * Draw the inside of a building.
- * v: { w, h, ph (prompt panel height), t, m, placed, pop, x, y, near, talk, wig, drawMe(x, y), mates, drawMate(o, x, y) }
+ * v: { w, h, ph (prompt panel height), t, m, placed, mask (which spots are filled), want (this player's spot),
+ *      last (spot just filled), pop, x, y, near, talk, wig, drawMe(x, y), mates, drawMate(o, x, y), colorOf(o) }
  */
 export function drawInterior(ctx, v) {
   const { w, h, t, m } = v;
@@ -90,7 +91,7 @@ export function drawInterior(ctx, v) {
   ctx.fillStyle = '#0006'; ctx.font = '800 20px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText(m.title.toUpperCase(), x0 + 20, y0 + 22);
 
-  const done = v.placed >= m.items.length;
+  const done = v.placed >= m.items.length, has = i => v.mask >> i & 1;
   const ring = (s, hot) => {
     ctx.save(); ctx.translate(fx(s.x), fy(s.y)); ctx.scale(1, 0.4);
     ctx.strokeStyle = hot ? '#ff8a3d' : '#0003'; ctx.lineWidth = hot ? 6 : 3; ctx.setLineDash([10, 8]); ctx.lineDashOffset = -t * 24;
@@ -99,12 +100,23 @@ export function drawInterior(ctx, v) {
     ctx.restore(); ctx.setLineDash([]);
   };
   const spots = roomSpots(m);
-  for (const s of spots) if (s.kind !== 'item' || s.i >= v.placed) ring(s, s.kind === 'item' ? s.i === v.placed : v.near === s);
+  for (const s of spots) {
+    if (s.kind !== 'item') ring(s, v.near === s);
+    else if (!has(s.i)) {
+      ring(s, s.i === v.want); // the glowing one is this player's; any free spot will do
+      const theirs = v.mates.find(o => o.want === s.i);
+      if (theirs) { // someone else is on this one
+        ctx.font = '800 13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.fillStyle = v.colorOf(theirs);
+        ctx.strokeText(theirs.name || 'taken', fx(s.x), fy(s.y) + 22); ctx.fillText(theirs.name || 'taken', fx(s.x), fy(s.y) + 22);
+      }
+    }
+  }
 
   const drawItem = s => {
     const wall = s.i < 3, ix = fx(s.x), iy = wall ? y0 + H * 0.36 : fy(s.y) - 22;
-    if (s.i < v.placed) {
-      const grow = s.i === v.placed - 1 ? Math.min(1, v.pop * 4) : 1;
+    if (has(s.i)) {
+      const grow = s.i === v.last ? Math.min(1, v.pop * 4) : 1;
       const wig = v.wig && v.wig.i === s.i ? Math.sin(v.wig.t * 30) * 8 * v.wig.t : 0;
       emoji(ctx, m.items[s.i], ix + wig, iy - (1 - grow) * 30, 56 * (0.4 + 0.6 * grow));
     } else if (wall) { ctx.fillStyle = '#0002'; ctx.font = '800 26px system-ui'; ctx.textAlign = 'center'; ctx.fillText('?', ix, iy); }

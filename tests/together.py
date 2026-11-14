@@ -48,7 +48,7 @@ def fetch(d, n):
             if q(d, "return !!window.__qq.CH.opts"):
                 break
             time.sleep(0.2)
-        t = q(d, "const i=window.__qq.inside, w=i.g.seq[i.placed]; const o=window.__qq.CH.opts.find(o=>o.id===w); return o && o.text")
+        t = q(d, "const i=window.__qq.inside; const o=window.__qq.CH.opts.find(o=>o.id===i.want); return o && o.text")
         key(d, t)
         time.sleep(0.7)
 
@@ -73,13 +73,21 @@ print("1 game:", q(a, "return window.__qq.inside.m.game"), "| Ann sees", q(a, "r
 key(a, Keys.ENTER)
 key(b, Keys.ENTER)
 time.sleep(0.6)
+time.sleep(1)
+print("  each has their own item: Ann", q(a, "return window.__qq.inside.want"), "| Bob", q(b, "return window.__qq.inside.want"),
+      "| list order", q(a, "return window.__qq.inside.g.seq"))
+bob_item = q(b, "return window.__qq.CH.opts.find(o=>o.id===window.__qq.inside.want).text")
+key(b, bob_item[:1])  # Bob starts typing his
 fetch(a, 2)
 time.sleep(1)
+print("  Bob's half-typed word survived Ann's two fetches:", q(b, "return window.__qq.CH.buf") == bob_item[:1])
+key(b, bob_item[1:])
+time.sleep(0.7)
 print("2 Ann fetched 2. Ann placed:", q(a, "return window.__qq.inside.placed"), "| Bob placed:", q(b, "return window.__qq.inside.placed"), "| Bob's dots:", b.find_element(By.ID, "dots").text)
 b.save_screenshot(str(OUT / "together.png"))
-fetch(b, 4)
+fetch(b, 3)
 time.sleep(1.5)
-print("3 Bob fetched the other 4. Ann placed:", q(a, "return window.__qq.inside.placed"), "done for Ann:", q(a, "return window.__qq.inside.fin"),
+print("3 Bob fetched the other 4 (from the back of the list). Ann placed:", q(a, "return window.__qq.inside.placed"), "done for Ann:", q(a, "return window.__qq.inside.fin"),
       "| Bob:", q(b, "return window.__qq.inside.placed"), q(b, "return window.__qq.inside.fin"))
 print("  city record:", q(a, "return JSON.stringify(window.__qq.st.rooms)"))
 
@@ -95,7 +103,26 @@ time.sleep(1.2)
 q(b, "window.__qq.enter('0:0')")
 time.sleep(0.5)
 print("4 Ann placed one thing in the house; Bob walks in later and sees:", q(b, "return window.__qq.inside.placed"), "| game:", q(b, "return window.__qq.inside.m.game"))
+# Ann starts on the second spot; Bob cannot take that one, but can do another at the same time
+q(a, "const r=window.__qq.inside; r.x=0.53; r.y=0.1;")
+time.sleep(0.4)
+key(a, Keys.ENTER)
+time.sleep(1.2)
+q(b, "const r=window.__qq.inside; r.x=0.53; r.y=0.1;")
+time.sleep(0.5)
+print("  Bob at Ann's spot:", b.find_element(By.ID, "hint").text, "| Bob's glowing spot:", q(b, "return window.__qq.inside.want"))
+q(b, "const r=window.__qq.inside; r.x=0.36+2*0.17; r.y=0.85;")  # spot 6
+time.sleep(0.5)
+key(b, Keys.ENTER)
+time.sleep(0.4)
+key(b, q(b, "return window.__qq.T.p.text"))
+time.sleep(0.4)
+key(a, q(a, "return window.__qq.T.p.text"))
+time.sleep(1.5)
+print("  both placed one, out of order: Ann's spots filled", bin(q(a, "return window.__qq.inside.mask")), "| Bob's", bin(q(b, "return window.__qq.inside.mask")))
+b.save_screenshot(str(OUT / "any_order.png"))
 time.sleep(4.5)
+time.sleep(1)
 print("5 saved with the city:", q(b, "return JSON.stringify(Object.values(JSON.parse(localStorage.getItem('qq.worlds')))[0].rooms)"))
 for who, d in (("A", a), ("B", b)):
     for l in d.get_log("browser"):

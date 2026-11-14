@@ -1,5 +1,6 @@
 import JOBS from './jobs.js';
 import { missionFor } from './missions.js';
+import { orderSeq } from './games.js';
 export { JOBS }; // city problems that pop up and need typing to fix
 
 // The shared city. The host runs these rules; everyone else just renders the
@@ -149,6 +150,21 @@ export function legacyWorld(room) {
   return null;
 }
 
+/**
+ * Progress inside a building is six slots (six things to place, fetch or get
+ * past), stored as 64 plus one bit per slot so that two players can work on
+ * different slots at once. Older cities stored a plain count 0 to 6; this
+ * turns either into the set of done slots.
+ */
+export function toMask(key, v) {
+  v |= 0;
+  if (v >= 64) return v & 63;
+  const [i, k] = key.split(':').map(Number);
+  const order = missionFor(i, k).game === 'order' ? orderSeq(`${i}:${k}`) : [0, 1, 2, 3, 4, 5];
+  let mask = 0;
+  for (let n = 0; n < Math.min(6, Math.max(0, v)); n++) mask |= 1 << order[n];
+  return mask;
+}
 /** The city's record key for the neighbor in building k of neighborhood i. */
 export const roomKeyOf = (i, k) => `${i}:${k}:${missionFor(i, k).id}`;
 /** Is this a believable building key, like "3:2:baker", in a neighborhood that exists? */
@@ -212,7 +228,7 @@ export class Host {
 
   /** Has every neighbor in neighborhood i been helped? */
   helped(i) {
-    for (let k = 0; k < 6; k++) if (!((this.st.rooms[roomKeyOf(i, k)] | 0) >= 6)) return false;
+    for (let k = 0; k < 6; k++) { const key = roomKeyOf(i, k); if (toMask(key, this.st.rooms[key]) !== 63) return false; }
     return true;
   }
   /**
@@ -262,9 +278,13 @@ export class Host {
     } else { st.combo = Math.max(0, st.combo - 0.12); return; } // a prompt with a slip delivers nothing
     if (st.combo >= 1) { st.combo = 0; this.event('gold'); this.sprinkle(1); }
     if (roomOk(m.room, st.d)) { // work inside a building counts for everyone in the city
-      const was = st.rooms[m.room] | 0, now = m.all ? 6 : Math.min(6, was + 1);
-      st.rooms[m.room] = now;
-      if (was < 6 && now >= 6) this.event('room', { room: m.room, by: from });
+      const was = toMask(m.room, st.rooms[m.room]);
+      let now = was;
+      if (m.all) now = 63;
+      else if (Number.isInteger(m.slot) && m.slot >= 0 && m.slot < 6) now |= 1 << m.slot;
+      else for (let b = 0; b < 6; b++) if (!(now >> b & 1)) { now |= 1 << b; break; } // no slot named: the next one in line
+      st.rooms[m.room] = 64 | now;
+      if (was !== 63 && now === 63) this.event('room', { room: m.room, by: from });
       this.settle();
     }
     if (m.job) {
@@ -341,7 +361,7 @@ export class Host {
     if (gen < (st.gen | 0)) return;
     if (gen > (st.gen | 0)) { Object.assign(st, { gen, d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, rooms: {}, built: 0, next: null, boss: null, items: [], jobs: [] }); this.event('merged'); }
     for (const [k, n] of Object.entries(w.rooms && typeof w.rooms === 'object' ? w.rooms : {}).slice(0, 2000)) {
-      if (roomOk(k, Math.max(st.d, w.d))) st.rooms[k] = Math.max(st.rooms[k] | 0, Math.min(6, Math.max(0, n | 0)));
+      if (roomOk(k, Math.max(st.d, w.d))) st.rooms[k] = 64 | toMask(k, st.rooms[k]) | toMask(k, Math.min(127, Math.max(0, n | 0)));
     }
     if (w.d < st.d) { st.built = Math.max(st.built | 0, w.built | 0, w.d); this.settle(); return; }
     const sites = district(w.d).sites, theirs = w.have.map((n, k) => Math.min(sites[k].need, Math.max(0, n | 0)));
