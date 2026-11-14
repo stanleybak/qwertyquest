@@ -99,3 +99,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #dots i.pop { background: #ffd23d; animation: dotpop .45s ease-out forwards; }
 @keyframes dotpop { 0% { transform: scale(1); opacity: 1; } 60% { transform: scale(2.6); opacity: .8; box-shadow: 0 0 0 6px #ffd23d55; } 100% { transform: scale(3.2); opacity: 0; } }
 #panel.again { box-shadow: 0 0 0 4px #8a5cf0, 0 6px 24px #0004; }
+#prompt.choices { display: flex; flex-wrap: wrap; gap: 8px 14px; justify-content: center; font-size: clamp(1.1rem, 2.4vw, 1.7rem); }
+.opt { background: #fff; border: 2px solid #0002; border-radius: 14px; padding: 2px 14px 2px 8px; white-space: pre; }
+.opt.off { opacity: .35; }
+.opt b { font-family: system-ui; font-weight: 400; margin-right: 8px; }

@@ -232,6 +232,11 @@ const chunks = s => s.split(/(?<=[.!?;:])\s+/).filter(c => c.length >= 20);
  * role: 0 hauler, 1 builder, 2 inspector. boss: aim at the player's weak keys.
  * Every prompt, whatever its length, is worth one load of bricks.
  */
+/** A short prompt to label one choice (a maze exit, a thing to fetch). */
+export function choicePrompt(p) {
+  return genPrompt(p.step > NS ? { ...p, step: NS } : p, 0).text;
+}
+
 export function genPrompt(p, role = 0, boss = false) {
   const step = p.step;
   const fresh = step < NS ? STAGES[step].keys : '';

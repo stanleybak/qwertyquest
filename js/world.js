@@ -65,8 +65,8 @@ export function walkable(x, y, d) {
 
 // City problems that pop up and need typing to fix.
 export const JOBS = [
-  { name: 'fire', icon: '🔥', tool: '🧯', call: 'Fire! Grab a hose and help put it out.', done: 'put out the fire', hint: 'Spray the fire!' },
-  { name: 'leak', icon: '💦', tool: '🔧', call: 'A pipe burst! Somebody fix that leak.', done: 'fixed the leak', hint: 'Tighten the pipe!' },
+  { name: 'fire', icon: '🔥', tool: '🧯', call: 'Fire in a building! Go inside and help put it out.', done: 'put out the fire', hint: 'Spray the fire!' },
+  { name: 'leak', icon: '💦', tool: '🔧', call: 'A pipe burst in a building! Go inside and fix the leaks.', done: 'fixed the leak', hint: 'Tighten the pipe!' },
   { name: 'cat', icon: '🐱', tool: '🪜', call: 'A kitten is stuck up a tree!', done: 'rescued the kitten', hint: 'Climb the ladder!' },
   { name: 'thief', icon: '🦹', tool: '🚨', call: 'A brick thief is on the loose! Catch up and stop them.', done: 'caught the brick thief', hint: 'Stop, thief!' },
 ];
@@ -115,14 +115,14 @@ export function saveWorld(room, st) {
 
 /** Host-side rules. `st` is the live state object; mutate it in place. */
 export class Host {
-  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 12; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
+  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 90; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
 
   /** Start a city problem: at a finished building if there is one, else out in the open. */
   spawnJob() {
     const st = this.st, D = district(st.d);
     const built = [];
     for (let i = st.d; i <= st.d; i++) { // only where the crew is working, never across the map
-      district(i).sites.forEach((s, k) => { if (i < st.d || st.have[k] >= s.need) built.push(s); });
+      district(i).sites.forEach((s, k) => { if (i < st.d || st.have[k] >= s.need) built.push({ ...s, k, d: i }); });
     }
     const taken = t => st.jobs.some(j => j.t === t);
     let types = [2, 3];
@@ -134,7 +134,7 @@ export class Host {
     const j = { id: st.jobId++, t, hp, max: hp, left: 300, who: [] };
     if (t < 2) {
       const s = built[Math.floor(Math.random() * built.length)];
-      Object.assign(j, { x: Math.round(s.x), y: Math.round(s.y), h: s.floors * 28, px: Math.round(s.x), py: Math.round(s.y + 48) });
+      Object.assign(j, { d: s.d, site: s.k, x: Math.round(s.x), y: Math.round(s.y), h: s.floors * 28, px: Math.round(s.x), py: Math.round(s.y + 48) });
     } else {
       const side = Math.random() < 0.5 ? -1 : 1;
       j.x = D.cx + side * (300 + Math.random() * 60); j.y = D.cy + (D.river ? -20 : 120);
@@ -191,7 +191,7 @@ export class Host {
       // the meter fills fastest when everyone is being accurate at the same time
       const ids = st.order.length ? st.order : [from];
       const frac = ids.filter(id => this.clean[id]).length / ids.length;
-      st.combo += 0.035 + 0.065 * frac;
+      st.combo += 0.02 + 0.03 * frac; // a team bonus every few minutes, not every few prompts
     } else { st.combo = Math.max(0, st.combo - 0.12); return; } // a prompt with a slip delivers nothing
     if (st.combo >= 1) { st.combo = 0; this.event('gold'); this.sprinkle(1); }
     if (m.job) {
@@ -267,8 +267,8 @@ export class Host {
       if (!st.jobs.length) this.spawnJob();
     }
     if ((this.itemIn -= dt) <= 0) {
-      this.itemIn = 45;
-      if (st.items.length < 2) {
+      this.itemIn = 180; // a power-up is a treat, not a constant
+      if (st.items.length < 1) {
         st.items.push({
           id: st.itemId++, t: Math.floor(Math.random() * 3),
           x: D.cx + (Math.random() - 0.5) * 640, y: D.cy + (D.river ? 100 : 40) + (Math.random() - 0.5) * 60,

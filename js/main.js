@@ -5,9 +5,10 @@ import { Host, newState, loadWorld, saveWorld, district, ZONE_R, JOBS, onRiver, 
 import * as Voice from './voice.js';
 import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
+import * as G from './games.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14a';
+const BUILD = '2026-11-14b';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -25,7 +26,8 @@ let curJob = 0;
 let inside = null;             // { id, m, placed, pop } while visiting a building
 let doorId = null, nagAt = 0;
 const redo = [];               // prompts typed with a slip; each comes back until it is typed clean
-let redoGap = 0, lastSlip = false;
+let redoGap = 0, lastSlip = false, redoDeck = '';
+const CH = { opts: null, buf: '', clean: true }; // a choice of labelled things: type one label to pick it
 let engaged = null;            // what the player chose to work on by pressing Enter, e.g. 's0:2', 'j5', 'boss'
 
 // ---------- sound ----------
@@ -146,7 +148,7 @@ function updateKb(next) {
   const kb = $('kb');
   // The guide is a crutch, so it only appears when it helps: while keys are
   // new, after a slip, or when the player has been stuck on a key for a while.
-  const show = P.guide && mode === 'game' && !!T.p
+  const show = P.guide && mode === 'game' && (!!T.p || !!CH.opts)
     && (P.fresh > 0 || T.miss > 0 || performance.now() - Math.max(T.last, T.shown) > 4000);
   if (show === kbShown && next === kbNext) return;
   kbShown = show; kbNext = next;
@@ -226,6 +228,111 @@ function typeChar(ch) {
   T.els.prompt.children[T.pos]?.classList.add('err');
   const box = T.els.prompt.closest('#panel, .card');
   box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+}
+
+// ---------- choices: several labels on offer, type one to pick it ----------
+const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || inside.m.game === 'order');
+/** The key the guide should point at: only known when one choice is left in play. */
+function nextKey() {
+  if (T.p) return T.p.text[T.pos];
+  if (!CH.opts || !CH.buf) return null;
+  const live = CH.opts.filter(o => o.text.startsWith(CH.buf));
+  return live.length === 1 ? live[0].text[CH.buf.length] : null;
+}
+function dealChoices() {
+  const g = inside.g, m = inside.m;
+  let opts;
+  if (m.game === 'maze') { g.labels = {}; opts = G.exits(g.mz, g.cell).map(d => ({ id: d, icon: G.ARROWS[d] })); }
+  else opts = g.seq.slice(inside.placed, inside.placed + 4).sort((a, b) => a - b).map(i => ({ id: i, icon: m.items[i] }));
+  const used = opts.map(o => g.labels[o.id]).filter(Boolean);
+  for (const o of opts) {
+    let t = g.labels[o.id];
+    // labels must differ, and none may be the start of another
+    for (let k = 0; !t && k < 300; k++) {
+      const c = S.choicePrompt(P);
+      if (!used.some(u => u.startsWith(c) || c.startsWith(u)) || (k > 250 && !used.includes(c))) t = c;
+    }
+    o.text = g.labels[o.id] = t || 'fj'.repeat(used.length + 1);
+    used.push(o.text);
+  }
+  CH.opts = opts; CH.buf = ''; CH.clean = true;
+  T.errs = new Set(); T.miss = 0; T.shown = performance.now();
+  $('panel').classList.remove('again');
+  $('hint').textContent = (m.game === 'maze' ? 'Which way? Type the word next to an arrow to go that way.'
+    : `${m.who} wants ${m.items[g.seq[inside.placed]]} next. Find it and type its word.`) + '  (Esc to stop)';
+  paintChoices();
+}
+function paintChoices() {
+  const el = $('prompt'); el.className = 'choices'; el.innerHTML = '';
+  $('found').classList.add('hidden');
+  for (const o of CH.opts) {
+    const live = o.text.startsWith(CH.buf);
+    const chip = document.createElement('div'); chip.className = 'opt' + (live ? '' : ' off');
+    const ic = document.createElement('b'); ic.textContent = o.icon; chip.appendChild(ic);
+    [...o.text].forEach((c, i) => {
+      const sp = document.createElement('span');
+      sp.className = 'ch' + (c === ' ' ? ' sp' : '') + (live && i < CH.buf.length ? ' ok' : live && CH.buf && i === CH.buf.length ? ' cur' : '');
+      sp.textContent = c; chip.appendChild(sp);
+    });
+    el.appendChild(chip);
+  }
+  updateKb(nextKey());
+}
+function typeChoice(ch) {
+  const now = performance.now(), next = CH.buf + ch;
+  const live = CH.opts.filter(o => o.text.startsWith(CH.buf));
+  if (live.some(o => o.text.startsWith(next))) {
+    S.recordKey(P, ch, true, CH.buf ? now - T.last : 0); S.lessonKey(P, true);
+    T.last = now; CH.buf = next; sfx.key();
+    const hit = CH.opts.find(o => o.text === next);
+    if (hit) chose(hit); else paintChoices();
+    return;
+  }
+  const wants = new Set(live.map(o => o.text[CH.buf.length]));
+  if (wants.size === 1) { const w = [...wants][0]; S.recordKey(P, w, false, 0); T.errs.add(w === ' ' ? 'space' : w.toLowerCase()); }
+  S.lessonKey(P, false); T.miss++; sfx.bad(); me.stumble = 0.5;
+  if (P.shields > 0 && CH.clean) { P.shields--; toast('🛡️ Your shield forgave that slip.'); }
+  else { CH.clean = false; P.streak = 0; }
+  paintChoices();
+  const box = $('panel'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+}
+function chose(o) {
+  const g = inside.g, m = inside.m, clean = CH.clean, errs = T.errs;
+  CH.buf = ''; CH.clean = true; T.errs = new Set();
+  if (!clean) { // same labels stay put until one is typed with no slips
+    $('panel').classList.add('again');
+    $('hint').textContent = '↩ That one had a slip. Type it again with no slips.  (Esc to stop)';
+    beep(300, 0.12, 'triangle', 0.06);
+    net.toHost('done', { site: -1, clean: false, boss: false, n: 1, job: 0 });
+    tally({ text: o.text }, false, errs, 0);
+    paintChoices();
+    return;
+  }
+  $('panel').classList.remove('again'); T.miss = 0;
+  if (m.game === 'order' && o.id !== g.seq[inside.placed]) {
+    $('hint').textContent = `Not yet! ${m.who} wants ${m.items[g.seq[inside.placed]]} first.  (Esc to stop)`;
+    beep(220, 0.14, 'triangle', 0.06);
+    paintChoices();
+    return;
+  }
+  sfx.load();
+  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0 });
+  CH.opts = null; $('prompt').innerHTML = '';
+  if (m.game === 'maze') { g.path = G.runFrom(g.mz, g.cell, o.id); g.cell = g.path[g.path.length - 1]; }
+  else {
+    delete g.labels[o.id];
+    inside.placed++; inside.pop = 0; P.rooms[inside.id] = inside.placed;
+    if (inside.placed >= 6) finishRoom();
+  }
+  tally({ text: o.text }, true, errs, 0);
+}
+/** The neighbor's problem is solved. */
+function finishRoom() {
+  inside.placed = 6; P.rooms[inside.id] = 6;
+  P.thanks++;
+  toast(`❤️ ${inside.m.who} says thank you!`, 'gold');
+  sfx.win(); npc(`m_${inside.m.id}_done`); inside.talk = 7;
+  S.saveProfile(P);
 }
 
 // ---------- start screen ----------
@@ -447,6 +554,7 @@ function zoneAt() {
 function jobAt() {
   let best = null, bd = 100;
   for (const j of st.jobs || []) {
+    if (j.site != null) continue; // fires and leaks are inside a building: use its door
     let d = Math.hypot(me.x - j.px, (me.y - j.py) / 0.7);
     if (j.id === curJob && d < 280) d = 0; // once you have started, a wandering thief cannot shake you off easily
     if (d < bd) { bd = d; best = j; }
@@ -480,17 +588,25 @@ function doorAt() {
   }
   return null;
 }
+/** The fire or leak in building `id`, if there is one. Those are solved indoors. */
+const jobIn = id => (st.jobs || []).find(j => j.site != null && `${j.d}:${j.site}` === id);
 function enterBuilding(id) {
   const [i, k] = id.split(':').map(Number);
-  const m = missionFor(i, k, district(i).sites[k].kind);
-  inside = { id, m, placed: Math.min(m.items.length, P.rooms[id] | 0), pop: 1, x: 0.86, y: 0.35, talk: 7, wig: null, near: null };
+  const m = missionFor(i, k);
+  const job = jobIn(id);
+  let placed = Math.min(6, P.rooms[id] | 0);
+  if (m.game === 'maze' && placed < 6) placed = 0; // a maze starts over on each visit
+  inside = { id, m, placed, pop: 1, x: job ? 0.96 : 0.86, y: job ? 0.5 : 0.35, talk: 7, wig: null, near: null, job: job ? job.id : 0, out: new Set(), nearF: -1, g: G.newGame(m, id, placed) };
   auto = null; held.clear(); stopTyping();
-  npc(inside.placed >= m.items.length ? `m_${m.id}_done` : `m_${m.id}`);
+  if (job) greeted.add(job.id);
+  npc(job ? `job${job.t}` : placed >= 6 ? `m_${m.id}_done` : `m_${m.id}`);
 }
+/** Rooms the player walks around in: furnishing, and fires or leaks. */
+const roomWalk = () => !!inside && (!!inside.job || inside.m.game === 'furnish');
 function leaveBuilding() { inside = null; stopTyping(); Voice.stop(); }
 /** Put the keyboard down: no challenge runs until the player presses Enter again. */
 function stopTyping() {
-  engaged = null; T.key = null; redo.length = 0; lastSlip = false; // each challenge is its own deck
+  engaged = null; T.key = null; lastSlip = false; CH.opts = null;
   $('panel').classList.remove('again');
   setPrompt(null, { prompt: $('prompt'), found: $('found') }, null);
 }
@@ -516,7 +632,7 @@ function greet() {
 
 function finishPrompt(secs) {
   const key = T.key, boss = key === 'boss', p = T.p;
-  const job = key.startsWith('j') ? +key.slice(1) : 0;
+  const job = key.startsWith('j') ? parseInt(key.slice(1)) : 0;
   const bricks = !job && !boss; // building work, outdoors or indoors
   const ok = T.clean;
   const n = ok && bricks && P.crane > 0 ? 2 : 1;
@@ -531,23 +647,26 @@ function finishPrompt(secs) {
     if (!inside) floatText('↩ so close! it will come back', me.x, me.y - 100, '#8a5cf0');
   } else if (p.redo) { sfx.win(); if (!inside) floatText('✔ got it!', me.x, me.y - 124, '#2fae66', 22); }
   else sfx.load();
-  if (!ok) { /* nothing delivered */ } else if (inside) {
+  if (!ok) { /* nothing delivered */ } else if (job && inside) inside.out.add(+key.split(':')[1]); // that fire is out
+  else if (inside) {
     inside.placed++; inside.pop = 0; P.rooms[inside.id] = inside.placed; inside.talk = 0;
-    if (inside.placed >= inside.m.items.length) {
-      P.thanks++; P.crane += 3;
-      toast(`❤️ ${inside.m.who} says thank you! You earned a crane: 3 double loads.`, 'gold');
-      sfx.win(); npc(`m_${inside.m.id}_done`); inside.talk = 7;
-    }
+    if (inside.placed >= 6) finishRoom();
   } else if (job) floatText(['💦 splash!', '🔧 clank!', '🪜 up!', '🚨 stop!'][T.jobType] || '👍', me.x, me.y - 100, '#2f7de1');
   else if (boss && st.boss) fx.push({ text: '🧱', x: me.x, y: me.y - 60, vx: (st.boss.x - me.x) * 2.5, vy: (st.boss.y - 80 - me.y + 60) * 2.5, life: 0.4, size: 26 });
   else floatText(n === 2 ? '+2 🧱' : '+1 🧱', me.x, me.y - 100, '#c8553d');
-  if (T.clean) {
+  tally(p, ok, T.errs, secs);
+  T.p = null; // the next frame deals a fresh prompt while the player stays on the job
+  me.prog = 0;
+}
+/** Score one finished prompt: streaks, spaced review, the lesson count, and anything unlocked. */
+function tally(p, clean, errs, secs) {
+  if (clean) {
     P.streak++; P.bestStreak = Math.max(P.bestStreak, P.streak);
-    if (P.streak % 5 === 0 && P.shields < 3) { P.shields++; toast(`🛡️ ${P.streak} clean in a row! You earned a shield: it forgives your next slip.`); }
+    if (P.streak % 10 === 0 && P.shields < 3) { P.shields++; toast(`🛡️ ${P.streak} clean in a row! You earned a shield: it forgives your next slip.`); }
   }
-  if (p.burst && secs <= p.burst) floatText('⚡ Speed burst!', me.x, me.y - 130, '#e6a700', 24);
+  if (p.burst && secs && secs <= p.burst) floatText('⚡ Speed burst!', me.x, me.y - 130, '#e6a700', 24);
   const rankBefore = S.rankOf(P).i;
-  S.reviewPrompt(P, p.text, T.errs);
+  S.reviewPrompt(P, p.text, errs);
   const res = S.lessonPrompt(P);
   if (res) {
     toast(`${'⭐'.repeat(res.stars)} Lesson done: ${Math.round(res.acc * 100)}% accurate` + (res.stars === 3 ? '. Crane earned: 3 double loads!' : ''));
@@ -563,13 +682,15 @@ function finishPrompt(secs) {
   if (S.rankOf(P).i !== rankBefore) { setTimeout(() => toast(`${S.rankOf(P).icon} You are now a ${S.rankOf(P).name}!`, 'gold'), 2200); sendProfile(); }
   if (P.fresh > 0) P.fresh--;
   S.saveProfile(P);
-  T.p = null; // the next frame deals a fresh prompt while the player stays on the job
-  me.prog = 0;
 }
 
 /** What could be worked on from where the player stands. Nothing starts until they press Enter. */
 function context() {
   if (inside) {
+    const j = inside.job && st.jobs.find(x => x.id === inside.job);
+    if (inside.job && !j) inside.job = 0; // solved: the room goes back to normal
+    if (j) { const i = inside.nearF = G.nearFire(inside, j.hp); return { base: i >= 0 ? `j${j.id}:${i}` : null, job: j, zone: -1 }; }
+    if (inside.m.game !== 'furnish') return { base: inside.placed < 6 ? `i${inside.id}:g` : null, job: null, zone: -1 };
     const sp = inside.near = nearSpot(inside);
     const ok = sp && sp.kind === 'item' && sp.i === inside.placed;
     return { base: ok ? `i${inside.id}:${sp.i}` : null, job: null, zone: -1 };
@@ -591,6 +712,7 @@ function updatePrompt() {
   me.act = c.job ? c.job.t : -1; curJob = c.job ? c.job.id : 0;
   paintDots(c);
   if (engaged) {
+    if (choosing()) { if (!CH.opts && !inside.g.path.length) dealChoices(); return c.zone; }
     if (!T.p) {
       T.key = engaged; T.site = c.zone; T.jobType = c.job ? c.job.t : -1;
       const role = c.base === 'boss' || c.job || inside ? 0 : myRole();
@@ -604,9 +726,9 @@ function updatePrompt() {
       tip('type');
       $('hint').textContent = (p.redo ? '↩ Second chance: type this one with no slips to deliver it.'
         : lastSlip ? 'That one had a slip, so its dot turned purple and it will come back.'
-          : inside ? `Type to bring in the next thing for ${inside.m.who}.`
-        : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
           : c.job ? JOBS[c.job.t].hint
+          : inside ? (inside.m.game === 'run' ? 'Type it to get past!' : `Type to bring in the next thing for ${inside.m.who}.`)
+        : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
             : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
               : p.perfect ? 'Perfect run: one slip sends you back to the start.'
                 : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : 'Type it to deliver a load of bricks.') + '  (Esc to stop)';
@@ -614,7 +736,14 @@ function updatePrompt() {
     return c.zone;
   }
   let hint;
-  if (inside) {
+  if (inside && c.job) {
+    const what = c.job.t ? 'leak' : 'fire';
+    hint = c.base ? `Press Enter to ${c.job.t ? 'fix this leak' : 'spray this fire'}.` : `Walk to a ${what} with the arrow keys.  (Esc to go outside)`;
+  } else if (inside && inside.m.game !== 'furnish') {
+    const m = inside.m;
+    hint = !c.base ? 'All done here! Press Esc to go back outside.'
+      : (m.game === 'maze' ? `Press Enter to start looking for ${m.goal}.` : m.game === 'run' ? `Press Enter to start running to ${m.goal}.` : `Press Enter to start fetching things for ${m.who}.`) + '  (Esc to go outside)';
+  } else if (inside) {
     const sp = inside.near, all = inside.placed >= inside.m.items.length;
     hint = !sp ? (all ? 'All done here! Look around, talk, or leave by the door.' : 'Walk to the glowing spot with the arrow keys.')
       : sp.kind === 'npc' ? `Press Enter to talk to ${inside.m.who}.`
@@ -624,6 +753,7 @@ function updatePrompt() {
   } else if (c.base === 'boss') hint = 'Press Enter to fight the Typo Monster!';
   else if (c.job) hint = `Press Enter to help. ${JOBS[c.job.t].hint}`;
   else if (c.base) hint = 'Press Enter to start building here.';
+  else if (doorId && jobIn(doorId)) hint = `${JOBS[jobIn(doorId).t].icon} Trouble inside! Press Enter to go in and help.`;
   else if (doorId) hint = P.rooms[doorId] >= 6 ? '🚪 Press Enter to visit.' : '🚪 Someone inside needs help! Press Enter to go in.';
   else hint = 'Walk to a glowing circle with the arrow keys, or press Enter to go to the nearest one.';
   $('hint').textContent = hint;
@@ -633,9 +763,9 @@ function updatePrompt() {
 /** How many clean prompts this challenge still needs. */
 function leftIn(c) {
   if (!engaged) return 0;
-  if (inside) return inside.m.items.length - inside.placed;
-  if (c.base === 'boss') return st.boss ? st.boss.hp : 0;
   if (c.job) return c.job.hp;
+  if (inside) return inside.m.game === 'maze' ? G.movesLeft(inside.g.mz, inside.g.cell) : 6 - inside.placed;
+  if (c.base === 'boss') return st.boss ? st.boss.hp : 0;
   return c.zone >= 0 ? district(st.d).sites[c.zone].need - st.have[c.zone] : 0;
 }
 /**
@@ -663,8 +793,14 @@ function paintDots(c) {
 function pressEnter() {
   if (engaged) return;
   const c = context();
-  if (c.base) { engaged = c.base; auto = null; return; }
+  if (c.base) {
+    // Slipped prompts stay owed for the whole challenge: a whole building, a whole site, a whole problem.
+    const deck = c.base[0] === 'i' ? 'i' + inside.id : c.base.split(':')[0] + (c.base[0] === 's' ? ':' + c.zone : '');
+    if (deck !== redoDeck) { redo.length = 0; redoDeck = deck; }
+    engaged = c.base; auto = null; return;
+  }
   if (inside) {
+    if (!roomWalk() || inside.job) return;
     const sp = inside.near;
     if (!sp) return;
     if (sp.kind === 'door') leaveBuilding();
@@ -737,11 +873,22 @@ function frame(now) {
   if (inside) {
     auto = null; inside.pop += dt; inside.talk = Math.max(0, inside.talk - dt);
     if (inside.wig && (inside.wig.t -= dt) <= 0) inside.wig = null;
-    const ix = (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0), iy = (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
+    const walk = roomWalk(), g = inside.g;
+    const ix = walk ? (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0) : 0, iy = walk ? (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0) : 0;
     inside.x = Math.min(0.97, Math.max(0.04, inside.x + ix * 0.4 * dt));
     inside.y = Math.min(1, Math.max(0, inside.y + iy * 1.3 * dt));
     if (ix) me.face = ix;
     inside.walk = !!(ix || iy);
+    if (!walk && inside.m.game === 'maze' && g.path.length) { // walk the corridor to the next fork
+      const tx = g.path[0] % G.MW, ty = (g.path[0] / G.MW) | 0, ax = tx - g.px, ay = ty - g.py, L = Math.hypot(ax, ay), s = 5 * dt;
+      if (L <= s) { g.px = tx; g.py = ty; g.path.shift(); if (!g.path.length && g.cell === g.mz.goal && inside.placed < 6) finishRoom(); }
+      else { g.px += ax / L * s; g.py += ay / L * s; if (ax) me.face = ax > 0 ? 1 : -1; }
+      inside.walk = true;
+    } else if (!walk && inside.m.game === 'run') {
+      const gap = G.runStop(inside.placed) - g.rx, s = 420 * dt;
+      g.rx += Math.abs(gap) <= s ? gap : Math.sign(gap) * s;
+      inside.walk = Math.abs(gap) > 1; me.face = 1;
+    }
   }
   if (auto && !dx && !dy) {
     const ax = auto.x - me.x, ay = auto.y - me.y, d = Math.hypot(ax, ay);
@@ -788,8 +935,11 @@ function frame(now) {
   cam.x += (me.x - cam.x) * Math.min(1, dt * 6);
   cam.y += (me.y - 50 + $('panel').offsetHeight / 2 - cam.y) * Math.min(1, dt * 6);
   if (inside) {
-    updateKb(T.p ? T.p.text[T.pos] : null);
-    drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe: (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: inside.walk }, x, y, now / 1000) });
+    updateKb(nextKey());
+    const drawMe = (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: inside.walk }, x, y, now / 1000);
+    const job = inside.job && st.jobs.find(j => j.id === inside.job);
+    if (job || inside.m.game !== 'furnish') G.drawGame(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, g: inside.g, placed: inside.placed, pop: inside.pop, opts: CH.opts ? CH.opts.map(o => o.id) : [], job, out: inside.out, nearF: inside.nearF, x: inside.x, y: inside.y, drawMe });
+    else drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe: (x, y) => drawPlayer(ctx, { ...me, boat: false, walk: inside.walk }, x, y, now / 1000) });
     updateHud(now);
     return;
   }
@@ -811,7 +961,7 @@ addEventListener('keydown', e => {
   if (e.key === 'Escape') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }
   if (e.key === 'Enter') { pressEnter(); e.preventDefault(); return; }
   if (e.key === 'Tab' || e.key === 'Backspace') { e.preventDefault(); return; }
-  if (e.key.length === 1) { e.preventDefault(); typeChar(e.key); }
+  if (e.key.length === 1) { e.preventDefault(); CH.opts ? typeChoice(e.key) : typeChar(e.key); }
 });
 addEventListener('keyup', e => held.delete(e.key));
 addEventListener('blur', () => held.clear());
@@ -871,4 +1021,4 @@ document.querySelectorAll('.screen .close').forEach(b => { b.onclick = () => { b
 document.querySelectorAll('#hud button').forEach(b => b.addEventListener('click', () => b.blur()));
 
 initStart();
-window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T }; // for debugging in the console
+window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; } }; // for debugging in the console

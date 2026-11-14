@@ -1,48 +1,51 @@
 // What is inside each finished building: a neighbor who needs help, and six
 // things to put in the room. Each typed prompt places one thing.
 
-const M = (id, who, face, title, ask, thanks, items, wall, floor) => ({ id, who, face, title, ask, thanks, items, wall, floor });
+// game: furnish (walk to each spot), order (fetch things in the order on the list),
+// maze (pick a way at each fork), run (get past six things in a hallway).
+const M = (id, who, face, title, ask, thanks, items, wall, floor, game = 'furnish', goal = '') => ({ id, who, face, title, ask, thanks, items, wall, floor, game, goal });
 
-// Indexed by building kind (house, shop, tower, landmark). Lines match tools/build_voices.py.
+// Grouped as homes, shops, halls and landmarks. Lines match tools/build_voices.py.
 export const MISSIONS = [
   [
     M('grandma', 'Grandma Rose', '👵', 'Grandma\'s house', 'Hello, dear. My new house is so empty. Will you help me bring in the furniture?',
       'Oh, it\'s lovely. It feels like home. Thank you, dear.', ['🛋️', '🛏️', '🪴', '🖼️', '🕰️', '🫖'], '#f6d6c9', '#c99a6b'),
-    M('roomkid', 'Pip', '🧒', 'Pip\'s room', 'This is my new room! It\'s got nothing in it yet. Help me set it up!',
-      'Best room ever! Thanks! You\'re awesome!', ['🛏️', '🧸', '🎮', '📚', '🪁', '🚀'], '#cfe8ff', '#8fb2d9'),
+    M('roomkid', 'Pip', '🧒', 'Pip\'s room', 'This is my new room! I made an obstacle course. Race to the flag, and get past all my toys!',
+      'You made it! Best race ever! You\'re awesome!', ['⚽', '🧸', '🎮', '📚', '🪁', '🚀'], '#cfe8ff', '#8fb2d9', 'run', '🏁'),
   ],
   [
-    M('baker', 'Baker Bo', '🧑‍🍳', 'The bakery', 'Welcome to my bakery! The shelves are bare. Help me fill them up!',
-      'Mmm. It smells delicious in here now. Thank you, my friend!', ['🍞', '🥐', '🧁', '🍪', '🥧', '🎂'], '#ffe9b8', '#d9a35f'),
-    M('petshop', 'Ms. Paws', '🧑‍🦰', 'The pet shop', 'The pets arrive today and nothing is ready! Can you help me?',
-      'Every pet has a home. You\'re the best!', ['🐠', '🐹', '🐇', '🦜', '🐢', '🐈'], '#d9f5d0', '#9ac88a'),
+    M('baker', 'Baker Bo', '🧑‍🍳', 'The bakery', 'Welcome to my bakery! I have a big order to pack. Bring me the treats in the order on my list!',
+      'Mmm. The order is all packed. Thank you, my friend!', ['🍞', '🥐', '🧁', '🍪', '🥧', '🎂'], '#ffe9b8', '#d9a35f', 'order'),
+    M('petshop', 'Ms. Paws', '🧑‍🦰', 'The pet shop', 'Oh no! Nibbles the hamster ran off into the back room. Can you find your way to him?',
+      'You found Nibbles! You\'re the best!', ['🐠', '🐹', '🐇', '🦜', '🐢', '🐈'], '#d9f5d0', '#9ac88a', 'maze', '🐹'),
   ],
   [
     M('librarian', 'Mr. Quill', '🧑‍🏫', 'The library', 'Shh. Welcome to the library. Could you help me put the books on the shelves?',
       'Wonderful. So many stories to read. Thank you.', ['📕', '📗', '📘', '📙', '📔', '🌍'], '#e6dcf5', '#a58fc7'),
-    M('scientist', 'Dr. Fizz', '🧑‍🔬', 'The science lab', 'My lab needs equipment for the big experiment! Give me a hand?',
-      'Eureka! It all works! Thank you, thank you!', ['🔬', '🧪', '🧲', '🔭', '⚗️', '💡'], '#d6f0f2', '#86b8bd'),
+    M('scientist', 'Dr. Fizz', '🧑‍🔬', 'The science lab', 'My big experiment is ready! Hand me the lab things in the order on my list!',
+      'Eureka! It all works! Thank you, thank you!', ['🔬', '🧪', '🧲', '🔭', '⚗️', '💡'], '#d6f0f2', '#86b8bd', 'order'),
   ],
   [
-    M('guide', 'Lady Marble', '🧑‍🎨', 'The museum', 'Welcome to the museum. Help me put our treasures on display!',
-      'Magnificent. The museum is open to all!', ['🦕', '🏺', '🗿', '💎', '🖼️', '👑'], '#f2ead8', '#b9a47a'),
-    M('captain', 'Captain Tide', '🧑‍✈️', 'The boathouse', 'Ahoy! This old boathouse needs gear before we can sail. Lend a hand, matey?',
-      'Shipshape! We sail at dawn. Thank ye kindly!', ['⚓', '🛟', '🧭', '🗺️', '🎣', '⛵'], '#d3e9f7', '#8a6a48'),
+    M('guide', 'Lady Marble', '🧑‍🎨', 'The museum', 'Welcome to the museum. Our crown is lost in the back halls. Can you find your way to it?',
+      'Magnificent. The crown is back where it belongs!', ['🦕', '🏺', '🗿', '💎', '🖼️', '👑'], '#f2ead8', '#b9a47a', 'maze', '👑'),
+    M('captain', 'Captain Tide', '🧑‍✈️', 'The boathouse', 'Ahoy! The boat is leaving! Run down the dock and hop over everything in your way, matey!',
+      'Shipshape! You made it aboard. Thank ye kindly!', ['📦', '🛢️', '🦀', '🪢', '🐟', '⚓'], '#d3e9f7', '#8a6a48', 'run', '⛵'),
   ],
 ];
 
 /** The mission inside building `k` of district `di`. Same on every device. */
-export function missionFor(di, k, kind) {
-  const list = MISSIONS[kind] || MISSIONS[0];
-  return list[(di * 5 + k * 3 + (di >> 1)) % list.length];
+export function missionFor(di, k) {
+  // Walk through all eight neighbors in turn, so each neighborhood has every kind of game.
+  const n = di * 6 + k;
+  return MISSIONS[[0, 1, 1, 0, 2, 2, 3, 3][n % 8]][[0, 0, 1, 1, 0, 1, 0, 1][n % 8]];
 }
 
-function emoji(ctx, e, x, y, size) {
+export function emoji(ctx, e, x, y, size) {
   ctx.fillStyle = '#000'; // color emoji take their opacity from the fill style
   ctx.font = `${size}px serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(e, x, y);
 }
-function wrap(ctx, text, maxW) {
+export function wrap(ctx, text, maxW) {
   const out = []; let line = '';
   for (const w of text.split(' ')) {
     if (ctx.measureText(line + ' ' + w).width > maxW && line) { out.push(line); line = w; } else line = line ? line + ' ' + w : w;
