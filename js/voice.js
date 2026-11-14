@@ -20,6 +20,14 @@ export const busy = ch => !!chans[ch]?.on;
 export function play(keys, vol = 1, ch = 'npc') {
   keys = [].concat(keys);
   if (!keys.length || !keys.every(has)) return false;
+  // One voice at a time. Characters outrank the word reader, a character who
+  // is mid-sentence finishes, and at most one more line waits its turn.
+  if (ch === 'word' && busy('npc')) return true;
+  if (ch === 'npc') {
+    const w = chans.word; if (w) { w.q = []; w.a.pause(); w.on = false; }
+    const n = chans.npc;
+    if (n?.on) { if (n.q.length < 1) n.q.push(...keys.slice(0, 1)); return true; }
+  }
   let c = chans[ch];
   if (!c) {
     c = chans[ch] = { a: new Audio(), q: [], vol, on: false };

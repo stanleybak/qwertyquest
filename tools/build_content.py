@@ -115,28 +115,28 @@ dad asks|all lads fall|a lass asks|add a salad|a lad falls|ask dad|dad asks a la
 a glad lad|dad has a flag|a lass has a flask|a half glass|dad had hash|glad dad|a flag sags|half a salad
 a hall flag|dad shall ask|a glass flask|all had salad|a lad had a flash|a gal has a flag|dad has gas
 a lad has a sash|shall dad dash|a lass had half|flags flash|a glad gal|dad had a gash|a hall has a flag
-he is glad|she likes fish|i feel glad|she sees a field|he likes jade|i like eggs|a kid slid|he fed a seal
-she has ideas|dad feeds a seal|i hide a shell|she said hi|kids like sleds|a safe lake|he is a kid|she is ill
-a leaf fell|all kids giggle|i see a hill|she hikes a hill|eagles like fish|i like salad|he hid a key
-she sells sea shells|a kid has a sled|i slid safe|he feels like a fish|she led a hike|life is like a lake
-a field of eggs|i did a flip|he skis a hill|she feeds geese|geese like a lake|he is as high as a hill
+he is glad|she likes fish|she feels glad|she sees a field|he likes jade|he likes eggs|a kid slid|he fed a seal
+she has ideas|dad feeds a seal|she hides a shell|she said hi|kids like sleds|a safe lake|he is a kid|she is ill
+a leaf fell|all kids giggle|he sees a hill|she hikes a hill|eagles like fish|she likes salad|he hid a key
+she sells sea shells|a kid has a sled|she slid safe|he feels like a fish|she led a hike|life is like a lake
+a field of eggs|he did a flip|he skis a hill|she feeds geese|geese like a lake|he is as high as a hill
 her hair is red|a girl likes a rug|he rides a sled|she drags a ladder|a shark is large|girls hear gulls
-he uses a ruler|her dress is dark|a deer fears fire|i rush here|i like fresh fries|she is sure|her jar is full
-he heard a gull|a red rug|i hug her|she led a huge herd|use glue here|a dark fir|real fur is rare
+he uses a ruler|her dress is dark|a deer fears fire|girls rush here|he likes fresh fries|she is sure|her jar is full
+he heard a gull|a red rug|she hugs her|she led a huge herd|use glue here|a dark fir|real fur is rare
 her girl rides a sled|a large raged fire|he fried eggs|sugar is like a jewel|a rider fell|hurry here
-she shares a raft|his ear is red|a fair deal|she uses a fake ruler|i fear sharks
+she shares a raft|his ear is red|a fair deal|she uses a fake ruler|seals fear sharks
 the dog is hot|she got a red hat|a toad sat there|this is the door|look at that kite|he took the food
-the goat ate oats|i hold the rope|that is a tall tree|little otters dig holes|the forest is so dark
+the goat ate oats|hold the rope|that is a tall tree|little otters dig holes|the forest is so dark
 she rode a horse to the lake|the stars are out|look at the stars|it is a good idea|dad told a joke
-he lost a shoe|the ghost is just a joke|are those hers|the road is so rough|take a seat|i eat a lot of fruit
+he lost a shoe|the ghost is just a joke|are those hers|the road is so rough|take a seat|he eats a lot of fruit
 the roof is red|the tiger is tired|too hot to hike|let us go fast|the gate is shut|a frog sat still
-get out of the lake|i forgot to eat|he is still at the house|tell us the rest|the fish too is fast
+get out of the lake|she forgot to eat|he is still at the house|tell us the rest|the fish too is fast
 the door is tall|sit to the left|a light is just out there|the dirt road is long|go get the ladder
-the hills are so far off|i got a letter to dad|feet first|let the horse rest|three or four eggs
+the hills are so far off|get a letter to dad|feet first|let the horse rest|three or four eggs
 why is the sky so high|you were right|we walk to the lake|the owl was wise|yes he will|they saw a yellow kite
 what a great day|you say it your way|we would like to stay|today is a good day|wash your hair|we share toys
 who ate the last egg|they stay with us|show us your work|how are you today|you write a story
-we drew a yellow flower|where is the towel|i wish i were taller|the wolf has gray fur|your key is here
+we drew a yellow flower|where is the towel|we wish it were hotter|the wolf has gray fur|your key is here
 we saw two eagles fly|say yes if you like|the water was too high|few of us like it wet|way to go
 we will try our best|what do you say|they followed the road west|your sister is with us|a year ago today
 please keep quiet|put the puppy to sleep|a squirrel ate the pear|the party is at four|pass the pepper please
@@ -145,16 +145,16 @@ pigs like apples|we slept at the lake|the proud ship sails|press the square key|
 quiet as a ghost|super idea|a path up the hill|the top step is slippery|stop for a sip of tea
 type the letters slowly|keep your fingers ready|a pile of paper plates|quite a party|a pair of quails
 the play was a hit|sleep is good for people|put your hat on top|your typing is quite good|a deep quiet pool
-the moon is in the sky|my mom makes me smile|many men ran home|one more time|i am not mad|the monkey is funny
+the moon is in the sky|my mom makes me smile|many men ran home|one more time|he is not mad|the monkey is funny
 rain is on the way|nine and one make ten|we found money|the mouse ran under the mat|sing me a song
-a small snake|queen and king|the sun warms the sand|now it is night|i want one more turn|hold my hand
+a small snake|queen and king|the sun warms the sand|now it is night|we want one more turn|hold my hand
 summer rain is warm|then we went home|no one is home|my friend is kind|the moon is not a planet
 a home needs many hands|men and women make things|morning is my time to run|the storm is done now
-i know my numbers|rain means the garden is happy|a kitten is on the fence|open the window|turn around
-the answer is nine|more and more snow|my name is not known|a plan for the afternoon|i am one of many
-i love ice cream|the cat can climb|seven cows came over|we drive a car|every voice counts|a cave is cold
+we know our numbers|rain means the garden is happy|a kitten is on the fence|open the window|turn around
+the answer is nine|more and more snow|my name is not known|a plan for the afternoon|you are one of many
+we love ice cream|the cat can climb|seven cows came over|we drive a car|every voice counts|a cave is cold
 cut the cake once|clouds cover the city|each child has a chance|the van moves very slow|she can dance
-a clever chicken|i have five coins|we visit the ocean|chairs are covered in velvet|i can hear music
+a clever chicken|you have five coins|we visit the ocean|chairs are covered in velvet|we can hear music
 the candy is very sweet|check the clock|can you come over|a circle has no corners|we love our school
 never give up|the river curves south|voices carry over water|the coach drives the van|a cup of cocoa
 bring the blue ball|big bears, small bugs|a baby bird|the bus is back|bake bread, not bricks
@@ -162,7 +162,7 @@ buy a book, read a book|the robot beeps|rabbits, bunnies, and bears|my brother h
 bubbles in the bath|both boats are brown|a banana, a berry, and a bun|the bridge is being built
 be brave, be bold|a bee is by the barn|blue, black, and brown|bring a blanket to bed|the best job is building
 bricks, boards, and beams|a better building, brick by brick|rub a dub dub|above and below
-the fox is in the box.|fix the taxi.|wax the next box.|i am six.|relax, it is fine.|the exit is next.
+the fox is in the box.|fix the taxi.|wax the next box.|he is six.|relax, it is fine.|the exit is next.
 mix the wax.|an extra box.|six foxes relax.|the taxi is next.|explore the next exit.|expect extra bricks.
 exactly six boxes.|fix it, mix it, box it.|the ox is next to the box.|a text is an extra.
 the zebra is in the zoo.|a lazy, fuzzy puzzle.|pizza is the prize.|zip it up.|a dizzy bee buzzes.
@@ -351,6 +351,8 @@ def main():
         if not re.fullmatch(r"[a-z]+", w) or w not in d:
             bad.append(w)
     for text in LOW:
+        if re.search(r"\bi\b", text):
+            bad.append(f"lowercase pronoun I in {text!r}: reword it")
         if not re.fullmatch(r"[a-z ,./;]+", text):
             bad.append(f"odd character in {text!r}")
     for text in PHRASES + FACTS + PASSAGES + LOW:

@@ -121,7 +121,7 @@ export class Host {
   spawnJob() {
     const st = this.st, D = district(st.d);
     const built = [];
-    for (let i = Math.max(0, st.d - 3); i <= st.d; i++) {
+    for (let i = st.d; i <= st.d; i++) { // only where the crew is working, never across the map
       district(i).sites.forEach((s, k) => { if (i < st.d || st.have[k] >= s.need) built.push(s); });
     }
     const taken = t => st.jobs.some(j => j.t === t);
@@ -142,7 +142,7 @@ export class Host {
       if (t === 3) { j.tx = j.x; j.ty = j.y; j.stun = 0; }
     }
     st.jobs.push(j);
-    this.event('job', { jt: t });
+    this.event('job', { jt: t, x: Math.round(j.px), y: Math.round(j.py) });
   }
 
   event(t, extra = {}) {
