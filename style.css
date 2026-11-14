@@ -91,3 +91,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #vol { pointer-events: auto; width: 80px; accent-color: var(--accent); }
 
 #aDebugOut { width: 100%; margin-top: 10px; font: .72rem var(--mono); border-radius: 10px; border: 2px solid #d9d2c3; padding: 8px; }
+
+#dots { min-height: 14px; margin-bottom: 4px; display: flex; gap: 5px; justify-content: center; flex-wrap: wrap; }
+#dots i { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); display: block; }
+#dots i.now { outline: 3px solid #ffd9b8; }
+#dots i.again { background: #8a5cf0; }

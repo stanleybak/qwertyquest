@@ -7,7 +7,7 @@ import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-13g';
+const BUILD = '2026-11-13i';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -365,22 +365,23 @@ function handleEvents() {
     if (ev.t === 'built') { const s = district(ev.d).sites[ev.site]; if (s && nearMe(s.x, s.y) && !inside) { confetti(s.x, s.y - 80); sfx.win(); tip('built'); } }
     else if (ev.t === 'district') {
       toast(`🎉 ${ev.name} is finished! A new neighborhood opens: ${district(ev.d + 1).name}`, 'gold');
-      confetti(me.x, me.y - 60, 120); sfx.win(); npc('district');
-    } else if (ev.t === 'gold') { toast('⭐ Team combo! Bonus bricks for every site.', 'gold'); sfx.win(); npc('combo'); }
-    else if (ev.t === 'boss') { toast('👾 A Typo Monster! Type to pelt it with bricks. Its weak spots are YOUR tricky keys.'); npc('boss'); }
-    else if (ev.t === 'bossWin') { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); npc('bosswin'); }
-    else if (ev.t === 'bossFlee') { toast('The Typo Monster kicked a brick loose and wandered off.'); npc('bossflee'); }
-    else if (ev.t === 'job') { toast('🚨 ' + JOBS[ev.jt].call); if (!inside && nearMe(ev.x ?? me.x, ev.y ?? me.y)) npc('job' + ev.jt); }
-    else if (ev.t === 'jobGone') { toast(ev.jt === 3 ? 'The brick thief got away this time.' : 'That problem sorted itself out.'); if (ev.jt === 3) npc('job3gone'); }
+      confetti(me.x, me.y - 60, 120); sfx.win(); if (!inside) npc('district');
+    } else if (ev.t === 'gold') { toast('⭐ Team combo! Bonus bricks for every site.', 'gold'); if (!busy()) { sfx.win(); npc('combo'); } }
+    // City problems and the monster never interrupt: they are announced when the player walks up to them (see greet()).
+    else if (ev.t === 'boss' || ev.t === 'job') { /* quiet */ }
+    else if (ev.t === 'bossWin') { if (engaged === 'boss' || !busy()) { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); npc('bosswin'); } }
+    else if (ev.t === 'bossFlee') { if (!busy()) { toast('The Typo Monster kicked a brick loose and wandered off.'); npc('bossflee'); } }
+    else if (ev.t === 'jobGone') { if (!busy() && ev.jt === 3) { toast('The brick thief got away this time.'); npc('job3gone'); } }
     else if (ev.t === 'jobDone') {
       const names = (ev.who || []).map(id => (id === net.selfId ? me.name : others.get(id)?.name)).filter(Boolean);
       toast(`${JOBS[ev.jt].icon} ${names.join(' and ') || 'The crew'} ${JOBS[ev.jt].done}! The neighbors sent bricks to say thanks.`, 'gold');
       ['🙋 Thank you!', '🙆 You saved the day!', '❤️', '❤️'].forEach((t, i) => setTimeout(() => floatText(t, ev.x - 60 + i * 40, ev.y - 30 - (i % 2) * 24, '#d6336c', 18), i * 350));
       const mine = (ev.who || []).includes(net.selfId);
+      if (!mine && busy()) continue; // someone else fixed it while this player was busy: say nothing
       if (mine || (nearMe(ev.x, ev.y) && !inside)) { confetti(ev.x, ev.y - 40, 50); sfx.win(); npc(`job${ev.jt}done`); }
       if ((ev.who || []).includes(net.selfId)) { P.thanks++; for (const it of S.newUnlocks(P)) toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'); S.saveProfile(P); }
     }
-    else if (ev.t === 'round') setTimeout(() => { const r = S.ROLES[myRole()]; toast(`New round! Your job: ${r.icon} ${r.name}`); }, 300);
+    else if (ev.t === 'round') setTimeout(() => { const r = S.ROLES[myRole()]; if (!busy()) toast(`New round! Your job: ${r.icon} ${r.name}`); }, 300);
   }
 }
 const myRole = () => (st.roles && st.roles[net?.selfId]) ?? 0;
@@ -493,6 +494,24 @@ function stopTyping() {
   setPrompt(null, { prompt: $('prompt'), found: $('found') }, null);
 }
 const nearMe = (x, y) => Math.hypot(x - me.x, y - me.y) < 900;
+/** In the middle of typing, or visiting a building: not to be interrupted. */
+const busy = () => !!engaged || !!inside;
+const greeted = new Set();
+/** Announce a problem or the monster only when a free player walks up to it. */
+function greet() {
+  if (busy()) return;
+  for (const j of st.jobs || []) {
+    if (greeted.has(j.id) || Math.hypot(j.px - me.x, j.py - me.y) > 300) continue;
+    greeted.add(j.id);
+    toast('🚨 ' + JOBS[j.t].call); npc('job' + j.t);
+  }
+  const b = st.boss;
+  if (!b) greeted.delete('boss');
+  else if (!greeted.has('boss') && Math.hypot(b.x - me.x, b.y - me.y) < 380) {
+    greeted.add('boss');
+    toast('👾 A Typo Monster! Press Enter to pelt it with bricks. Its weak spots are YOUR tricky keys.'); npc('boss');
+  }
+}
 
 function finishPrompt(secs) {
   const key = T.key, boss = key === 'boss', p = T.p;
@@ -506,7 +525,7 @@ function finishPrompt(secs) {
   if (!ok) {
     // Not delivered. The same prompt returns after the next one, until it is typed with no slips.
     redo.push({ ...p, step: P.step }); if (redo.length > 4) redo.shift();
-    redoGap = 1;
+    redoGap = 1 + Math.floor(Math.random() * 3); // shuffled back into the deck: it returns in 1 to 3 prompts
     beep(300, 0.12, 'triangle', 0.06);
     if (!inside) floatText('↩ so close! it will come back', me.x, me.y - 100, '#8a5cf0');
   } else if (p.redo) { sfx.win(); if (!inside) floatText('✔ got it!', me.x, me.y - 124, '#2fae66', 22); }
@@ -554,11 +573,13 @@ function context() {
     const ok = sp && sp.kind === 'item' && sp.i === inside.placed;
     return { base: ok ? `i${inside.id}:${sp.i}` : null, job: null, zone: -1 };
   }
-  if (st.boss) return { base: 'boss', job: null, zone: -1 };
   const job = jobAt();
   if (job) return { base: `j${job.id}`, job, zone: -1 };
   const zone = zoneAt();
-  return { base: zone >= 0 ? `s${st.d}:${zone}` : null, job: null, zone };
+  if (zone >= 0) return { base: `s${st.d}:${zone}`, job: null, zone };
+  // the monster is a place you walk to; it never takes over what you are doing
+  const nearBoss = st.boss && Math.hypot(st.boss.x - me.x, (st.boss.y - me.y) / 0.7) < 170;
+  return { base: nearBoss ? 'boss' : null, job: null, zone: -1 };
 }
 
 /** Keep the prompt panel in step with where the player is and whether they chose to start. */
@@ -567,6 +588,7 @@ function updatePrompt() {
   if (engaged && engaged !== c.base) stopTyping(); // walked away, or the work here is finished
   doorId = !inside && !c.base ? doorAt() : null;
   me.act = c.job ? c.job.t : -1; curJob = c.job ? c.job.id : 0;
+  paintDots(c);
   if (engaged) {
     if (!T.p) {
       T.key = engaged; T.site = c.zone; T.jobType = c.job ? c.job.t : -1;
@@ -603,6 +625,24 @@ function updatePrompt() {
   else hint = 'Walk to a glowing circle with the arrow keys, or press Enter to go to the nearest one.';
   $('hint').textContent = hint;
   return c.zone;
+}
+
+/** One dot per prompt still to do in this challenge; purple ones are retries waiting in the deck. */
+let dotsKey = '';
+function paintDots(c) {
+  let left = 0;
+  if (engaged) {
+    if (inside) left = inside.m.items.length - inside.placed;
+    else if (c.base === 'boss') left = st.boss ? st.boss.hp : 0;
+    else if (c.job) left = c.job.hp;
+    else if (c.zone >= 0) left = district(st.d).sites[c.zone].need - st.have[c.zone];
+  }
+  const again = engaged ? redo.length : 0, key = `${left}:${again}`;
+  if (key === dotsKey) return;
+  dotsKey = key;
+  const el = $('dots'); el.innerHTML = '';
+  for (let i = 0; i < Math.min(24, left); i++) { const d = document.createElement('i'); if (i === 0) d.className = 'now'; el.appendChild(d); }
+  for (let i = 0; i < again; i++) { const d = document.createElement('i'); d.className = 'again'; el.appendChild(d); }
 }
 
 /** Enter: start the work here, or use whatever the player is standing at. */
@@ -724,6 +764,7 @@ function frame(now) {
 
   const modal = document.querySelector('.screen:not(.hidden)');
   const zone = modal ? -1 : updatePrompt();
+  if (!modal) greet();
 
   for (let i = fx.length - 1; i >= 0; i--) {
     const f = fx[i];

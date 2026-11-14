@@ -96,9 +96,9 @@ export function district(i) {
 export function newState() {
   return {
     d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, combo: 0,
-    boss: null, bossIn: 150, round: 0, roundLeft: 120,
+    boss: null, bossIn: 420, round: 0, roundLeft: 300,
     roles: {}, order: [], items: [], itemId: 1, ev: [], evId: 0,
-    jobs: [], jobId: 1, jobIn: 20,
+    jobs: [], jobId: 1, jobIn: 100,
   };
 }
 const saveKey = room => 'qq.world.' + (room || 'solo');
@@ -115,7 +115,7 @@ export function saveWorld(room, st) {
 
 /** Host-side rules. `st` is the live state object; mutate it in place. */
 export class Host {
-  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 12; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 20; }
+  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 12; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
 
   /** Start a city problem: at a finished building if there is one, else out in the open. */
   spawnJob() {
@@ -203,6 +203,7 @@ export class Host {
       if (j.hp <= 0) {
         st.jobs.splice(i, 1);
         this.event('jobDone', { jt: j.t, x: j.px, y: j.py, who: j.who });
+        st.jobIn = Math.max(st.jobIn, 120); st.bossIn = Math.max(st.bossIn, 120);
         st.combo += 0.15;
         this.sprinkle(1); // grateful neighbors chip in bricks
       }
@@ -210,7 +211,7 @@ export class Host {
     }
     if (st.boss && m.boss) {
       st.boss.hp -= 1;
-      if (st.boss.hp <= 0) { st.boss = null; st.bossIn = 240; this.event('bossWin'); this.sprinkle(2); }
+      if (st.boss.hp <= 0) { st.boss = null; st.bossIn = 480; st.jobIn = Math.max(st.jobIn, 90); this.event('bossWin'); this.sprinkle(2); }
       return;
     }
     this.addLoads(m.site | 0, m.n === 2 ? 2 : 1);
@@ -232,7 +233,7 @@ export class Host {
 
   tick(dt) {
     const st = this.st, D = district(st.d);
-    if ((st.roundLeft -= dt) <= 0) { st.round++; st.roundLeft = 120; this.assignRoles(); this.event('round'); }
+    if ((st.roundLeft -= dt) <= 0) { st.round++; st.roundLeft = 300; this.assignRoles(); this.event('round'); }
     for (const id of st.order) if (!(id in st.roles)) { this.assignRoles(); break; }
     if (st.boss) {
       st.boss.left -= dt;
@@ -240,9 +241,9 @@ export class Host {
         // the monster got bored: it kicks a few bricks loose and wanders off
         const k = st.have.findIndex(n => n > 0);
         if (k >= 0) { st.have[k]--; st.total--; }
-        st.boss = null; st.bossIn = 200; this.event('bossFlee');
+        st.boss = null; st.bossIn = 480; st.jobIn = Math.max(st.jobIn, 90); this.event('bossFlee');
       }
-    } else if (st.total >= 8 && (st.bossIn -= dt) <= 0) {
+    } else if (st.total >= 8 && !st.jobs.length && (st.bossIn -= dt) <= 0) { // one thing at a time
       const hp = 5 + 4 * this.players();
       st.boss = { hp, max: hp, left: 80, x: D.cx, y: D.cy + 40 };
       this.event('boss');
@@ -261,12 +262,12 @@ export class Host {
       if ((j.left -= dt) <= 0) { st.jobs.splice(i, 1); this.event('jobGone', { jt: j.t }); }
     }
     if (st.total >= 3 && !st.boss && (st.jobIn -= dt) <= 0) {
-      st.jobIn = 40;
-      if (st.jobs.length < 2) this.spawnJob();
+      st.jobIn = 150; // a calm pace: a problem every few minutes, never two at once
+      if (!st.jobs.length) this.spawnJob();
     }
     if ((this.itemIn -= dt) <= 0) {
-      this.itemIn = 18;
-      if (st.items.length < 3) {
+      this.itemIn = 45;
+      if (st.items.length < 2) {
         st.items.push({
           id: st.itemId++, t: Math.floor(Math.random() * 3),
           x: D.cx + (Math.random() - 0.5) * 640, y: D.cy + (D.river ? 100 : 40) + (Math.random() - 0.5) * 60,
