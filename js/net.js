@@ -62,7 +62,12 @@ async function reachedLocally(pc) {
   if (!pair) for (const r of stats.values()) if (r.type === 'candidate-pair' && (r.selected || (r.nominated && r.state === 'succeeded'))) pair = r;
   const remote = pair && stats.get(pair.remoteCandidateId);
   if (!remote) return null;
-  return remote.candidateType === 'host' && isLocal(remote.address ?? remote.ip);
+  const addr = remote.address ?? remote.ip;
+  if (remote.candidateType === 'host') return isLocal(addr);
+  // A local peer can also turn up as "peer reflexive": its address was learned
+  // from the first packets instead of from signalling. That only counts when
+  // the address is visible and private.
+  return remote.candidateType === 'prflx' && !!addr && isLocal(addr);
 }
 
 export class Net {
@@ -191,7 +196,7 @@ export class Net {
   /** Ask the host of a city to let this device in. `key` gets a past member in without anyone having to say yes. */
   ask(hostId, key, name) {
     this.cancelAsk();
-    const knock = () => this._send('ask', { key: key || '', name: this.h.myName() }, hostId);
+    const knock = () => this._send('ask', { key: key || '', name: this.h.myName(), ver: this.h.myVer() }, hostId);
     this.asking = { host: hostId, name, timer: setInterval(knock, 2000) };
     knock();
   }
@@ -211,7 +216,7 @@ export class Net {
     const now = performance.now();
     if (kind === 'state') {
       if (!data || typeof data.w !== 'string') return;
-      this.worlds.set(from, { id: data.w, name: String(data.wn || 'A city').slice(0, 24), host: from, n: (data.order || []).length, d: data.d | 0, at: now });
+      this.worlds.set(from, { id: data.w, name: String(data.wn || 'A city').slice(0, 24), host: from, n: (data.order || []).length, d: data.d | 0, ver: data.ver, at: now });
       if (!this.world || data.w !== this.world.id) return; // some other city
       if (this.isHost) {
         // The same city has two hosts (both carried on after losing each other).
@@ -229,6 +234,7 @@ export class Net {
     }
     if (kind === 'ask') {
       if (!this.isHost) return;
+      if (!data || data.ver !== this.h.myVer()) { this.deny(from); this.h.onClash(); return; } // a city runs one version of the game
       if (data && data.key && data.key === this.world.key) this.admit(from); // has been here before
       else this.h.onAsk(from, String((data && data.name) || 'Someone').slice(0, 12));
       return;

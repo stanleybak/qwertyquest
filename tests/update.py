@@ -30,18 +30,19 @@ q("const q=window.__qq; q.me.x=-222; q.me.y=133; for (let i=0;i<2;i++) q.host.do
 city = q("return window.__qq.net.world.id")
 print("before: update card hidden:", q("return document.getElementById('update').classList.contains('hidden')"))
 try:
-    (ROOT / "version.json").write_text(json.dumps({"hash": "pretend-new-version"}) + "\n")
-    time.sleep(23)
-    print("after a new version.json: card hidden:", q("return document.getElementById('update').classList.contains('hidden')"))
+    (ROOT / "version.json").write_text(json.dumps({"hash": "pretend-new-version", "files": ["js/main.js"]}) + "\n")
+    time.sleep(6.5)
+    print("within 7 s of a new version.json: card hidden:", q("return document.getElementById('update').classList.contains('hidden')"),
+          "|", d.find_element(By.ID, "updateMsg").text)
     d.save_screenshot(str(ROOT / "tests" / "out" / "update.png"))
-    d.find_element(By.ID, "updateGo").click()
-    time.sleep(7)
-    print("after Update now: start screen skipped:", q("return document.getElementById('start').classList.contains('hidden')"),
-          "| same city:", q("return window.__qq.net.world && window.__qq.net.world.id") == city,
-          "| position:", q("return [Math.round(window.__qq.me.x), Math.round(window.__qq.me.y)]"),
-          "| bricks:", q("return window.__qq.st.have"))
 finally:
     subprocess.run(["python3", str(ROOT / "tools" / "stamp_version.py")], check=True, capture_output=True)
+time.sleep(9)  # not typing, so it updates by itself
+print("after the automatic update: start screen skipped:", q("return document.getElementById('start').classList.contains('hidden')"),
+      "| same city:", q("return window.__qq.net && window.__qq.net.world && window.__qq.net.world.id") == city,
+      "| position:", q("return [Math.round(window.__qq.me.x), Math.round(window.__qq.me.y)]"),
+      "| bricks:", q("return window.__qq.st.have"),
+      "| card hidden again:", q("return document.getElementById('update').classList.contains('hidden')"))
 for l in d.get_log("browser"):
     if "favicon" not in l["message"]:
         print("LOG", l["level"], l["message"][:240])

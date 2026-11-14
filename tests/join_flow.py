@@ -127,3 +127,17 @@ logs(b, "B")
 logs(c, "C")
 b.quit()
 c.quit()
+
+# a device running another version of the game is turned away without bothering the host
+a, b = browser(), browser()
+tag = tag + "v"
+start(a, "Ann")
+time.sleep(6)
+start(b, "Bob")
+time.sleep(5.5)
+host_id = q(a, "return window.__qq.net.selfId")
+q(b, "window.__qq.net._send('ask', {key:'', name:'Old Bob', ver:'some-older-version'}, '%s')" % host_id)
+time.sleep(1.5)
+print("11 ask from another version: host shown a card?", repr(a.find_element(By.ID, "asks").text), "| members:", q(a, "return window.__qq.net.order.length"))
+a.quit()
+b.quit()

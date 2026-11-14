@@ -7,6 +7,7 @@ import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 import * as G from './games.js';
 import DATA from './content-data.js';
+import VERSION from './version.js';
 
 const $ = id => document.getElementById(id);
 const BUILD = '2026-11-14i';
@@ -520,6 +521,7 @@ const handlers = {
   },
   onState(data) {
     const first = !gotState;
+    if (data.ver !== VERSION) versionClash();
     data.jobs ||= [];
     st = data; host = null; gotState = true;
     if (first) {
@@ -532,6 +534,8 @@ const handlers = {
     handleEvents();
   },
   myName: () => P.name,
+  myVer: () => VERSION,
+  onClash: () => versionClash(),
   onWorlds() {
     if (mode !== 'lobby') return;
     if (net.asking && lobbyReady && !net.worlds.has(net.asking.host)) { net.cancelAsk(); lobbyNote = 'That city just closed.'; }
@@ -631,10 +635,11 @@ async function startGame() {
     let menu = false;
     try { menu = !!sessionStorage.getItem('qq.menu'); sessionStorage.removeItem('qq.menu'); } catch { /* ignore */ }
     const saved = loadWorlds(), ids = Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at), open = openCities();
-    const known = open.find(w => saved[w.id]);
+    const known = open.find(w => saved[w.id] && w.ver === VERSION);
     if (mode !== 'lobby' || net.asking) return;
     if (!menu && known) return joinCity(known);                  // our own city is already open here: walk right in
     if (!menu && !open.length && ids.length <= 1) return hostCity(ids[0]); // nothing to choose between
+    if (open.some(w => w.ver !== VERSION)) versionClash();
     paintLobby();
   }, net.room ? 3500 : 0);
 }
@@ -668,9 +673,10 @@ function paintLobby() {
   if (lobbyNote) add('p', lobbyNote, 'sub');
   const saved = loadWorlds(), open = openCities();
   for (const w of open) {
-    const b = add('button', '', 'city');
-    b.append(`🏙️ ${w.name}`, Object.assign(document.createElement('small'), { textContent: `${w.n} building there now · ask to join` }));
-    b.onclick = () => joinCity(w);
+    const b = add('button', '', 'city'), same = w.ver === VERSION;
+    b.append(`🏙️ ${w.name}`, Object.assign(document.createElement('small'), { textContent: same ? `${w.n} building there now · ask to join` : 'getting an update… one moment' }));
+    b.disabled = !same; // everyone in a city runs the same version
+    if (same) b.onclick = () => joinCity(w); else versionClash();
   }
   for (const id of Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at).slice(0, 4)) {
     if (open.some(w => w.id === id)) continue;
@@ -702,28 +708,48 @@ function saveAll() {
 }
 
 // ---------- updates ----------
-// version.json holds a hash of the game's files. When it changes, a newer
-// game has been published: offer it, and come back to the same spot after.
-let myVersion = null;
-function reloadInPlace() {
+// version.json holds a hash of the game's files, and js/version.js holds the
+// hash this running copy was built with. When they differ, a newer game has
+// been published. Everyone in a city has to run the same version, so the game
+// updates itself as soon as the player is not in the middle of typing, and
+// comes back to the same spot.
+let latest = null, staleFor = 0, lastCheck = 0;
+async function reloadInPlace() {
   saveAll();
   if (net?.world && host) saveWorld(net.world, st);
-  try { sessionStorage.setItem('qq.resume', '1'); } catch { /* ignore */ }
+  try {
+    sessionStorage.setItem('qq.resume', '1');
+    if (latest) sessionStorage.setItem('qq.upd', `${latest.hash}:${updTries() + 1}`);
+  } catch { /* ignore */ }
+  // refresh the browser's copies first, or the reload could bring back the old files
+  if (latest) await Promise.all((latest.files || []).map(f => fetch(f, { cache: 'reload' }).catch(() => {})));
   location.reload();
 }
+/** How many times this tab already reloaded for the newest version (a stuck cache must not loop forever). */
+function updTries() {
+  try { const [h, n] = (sessionStorage.getItem('qq.upd') || ':0').split(':'); return latest && h === latest.hash ? +n : 0; } catch { return 0; }
+}
 async function checkVersion() {
+  lastCheck = performance.now();
   try {
     const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
-    const v = (await r.json()).hash;
-    if (!v) return;
-    if (!myVersion) { myVersion = v; return; }
-    if (v === myVersion || !$('update').classList.contains('hidden')) return;
-    if (mode !== 'game') { if (mode !== 'place') reloadInPlace(); return; } // nothing to interrupt yet
+    const v = await r.json();
+    if (!v.hash || v.hash === VERSION) { latest = null; $('update').classList.add('hidden'); return; }
+    if (!latest || latest.hash !== v.hash) { latest = v; beep(660, 0.1, 'sine', 0.06); beep(990, 0.14, 'sine', 0.06, 0.1); }
+    if (mode !== 'game') { if (mode !== 'place' && updTries() < 2) reloadInPlace(); return; } // nothing to interrupt yet
     $('update').classList.remove('hidden');
-    beep(660, 0.1, 'sine', 0.06); beep(990, 0.14, 'sine', 0.06, 0.1);
   } catch { /* offline, or no version file: try again later */ }
 }
-checkVersion(); setInterval(checkVersion, 20000);
+/** Someone here runs a different version: find out at once whether this copy is the old one. */
+function versionClash() { if (performance.now() - lastCheck > 1500) checkVersion(); }
+checkVersion(); setInterval(checkVersion, 5000);
+setInterval(() => {
+  if (!latest || mode !== 'game') return;
+  const auto = updTries() < 2;
+  if (engaged || !auto) { staleFor = 0; $('updateMsg').textContent = auto ? '✨ A new version is ready. It loads when you finish this.' : '✨ A new version is ready.'; return; }
+  $('updateMsg').textContent = `✨ Updating in ${Math.max(0, 3 - staleFor)}…`;
+  if (++staleFor > 3) reloadInPlace();
+}, 1000);
 
 function enterCity() {
   mode = 'game';
@@ -753,7 +779,7 @@ function hostTick() {
   const now = performance.now(), dt = Math.min(2, (now - lastTick) / 1000);
   lastTick = now;
   if (!host || !net.isHost) return;
-  st.order = net.order; st.w = net.world.id; st.wn = net.world.name;
+  st.order = net.order; st.w = net.world.id; st.wn = net.world.name; st.ver = VERSION;
   host.tick(dt);
   net.broadcast('state', st);
   handleEvents();
@@ -1054,7 +1080,7 @@ const liveOthers = now => [...others.values()].filter(o => o.seen && now - o.at 
 function debugInfo() {
   const now = performance.now(), short = id => (id || '').slice(0, 6);
   return JSON.stringify({
-    build: BUILD, version: myVersion, time: new Date().toISOString(), room: roomLabel, roomId: short(roomId), city: net?.world?.name, citiesSeen: [...(net?.worlds.values() || [])].map(w => w.name),
+    build: BUILD, version: VERSION, newest: latest?.hash, time: new Date().toISOString(), room: roomLabel, roomId: short(roomId), city: net?.world?.name, citiesSeen: [...(net?.worlds.values() || [])].map(w => w.name),
     self: short(net?.selfId), host: short(net?.hostId), isHost: net?.isHost, ready: net?.ready,
     order: (net?.order || []).map(short),
     peers: [...(net?.peers || [])].map(id => {
