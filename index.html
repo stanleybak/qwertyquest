@@ -105,7 +105,8 @@
     <label class="row"><input type="checkbox" id="aPacing"> Daily pacing: up to three new steps and one counted shift per day</label>
     <label class="row"><input type="checkbox" id="aGuide"> Show the keyboard guide when keys are new, after a slip, or when stuck</label>
     <label>Private room code, for playing with someone on another network (leave empty for the same-Wi-Fi city, which only devices on your network can join)
-      <input id="aRoom" maxlength="24" autocomplete="off" spellcheck="false" placeholder="e.g. grandma"></label>
+      <input id="aRoom" maxlength="40" autocomplete="off" spellcheck="false" placeholder="empty = same-Wi-Fi city"></label>
+    <p class="small">Anyone who has the code can join, so do not use a single easy word. <button id="aMake" class="link" type="button">Make a four-word code for me</button></p>
     <div id="aStats" class="small"></div>
     <div class="rowbtn">
       <button id="aJoin">Join room</button>

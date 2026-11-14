@@ -6,6 +6,7 @@ import * as Voice from './voice.js';
 import { missionFor, drawInterior, nearSpot } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 import * as G from './games.js';
+import DATA from './content-data.js';
 
 const $ = id => document.getElementById(id);
 const BUILD = '2026-11-14d';
@@ -1112,6 +1113,10 @@ $('aDebug').onclick = () => {
   navigator.clipboard?.writeText(out.value).then(() => toast('Debug info copied.'), () => {});
 };
 $('aJoin').onclick = () => { try { localStorage.setItem('qq.crew', $('aRoom').value.trim()); } catch { /* ignore */ } location.hash = ''; location.reload(); };
+$('aMake').onclick = () => { // four random words: easy to read out over the phone, hard to guess
+  const ws = DATA.words.flat().filter(w => w.length >= 4 && w.length <= 6), r = crypto.getRandomValues(new Uint32Array(4));
+  $('aRoom').value = [...r].map(n => ws[n % ws.length]).join(' ');
+};
 $('aRetest').onclick = () => { P.placed = false; S.saveProfile(P); location.reload(); };
 $('aReset').onclick = () => { if (confirm('Erase this player\'s progress on this device?')) { S.resetProfile(); location.reload(); } };
 document.querySelectorAll('.screen .close').forEach(b => { b.onclick = () => { b.closest('.screen').classList.add('hidden'); b.blur(); }; });
