@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QwertyQuest</title>
+<meta name="description" content="Build a city together by typing. A co-op typing game for ages 6 to adult.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧱</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="hud-left">
+    <div id="district" class="chip big"></div>
+    <div id="role" class="chip" title="Your job this round. Jobs rotate."></div>
+  </div>
+  <div class="hud-mid">
+    <div class="meter" title="Team combo: fills when everyone types cleanly"><div id="combo"></div><span>TEAM COMBO</span></div>
+    <div id="bossbar" class="meter boss hidden"><div id="bosshp"></div><span id="bosstxt">TYPO MONSTER</span></div>
+  </div>
+  <div class="hud-right">
+    <div id="shift" class="chip" title="Today's shift"></div>
+    <div id="powers" class="chip" title="Power-ups"></div>
+    <div id="crew" class="chip" title="Builders here"></div>
+    <button id="btnWear" title="Wardrobe">🎒</button>
+    <button id="btnSound" title="Sound">🔊</button>
+    <button id="btnAdult" title="Grown-ups">⚙️</button>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<div id="panel" class="hidden">
+  <div id="found" class="hidden"></div>
+  <div id="prompt"></div>
+  <div id="hint"></div>
+  <div id="kb"></div>
+</div>
+
+<div id="start" class="screen">
+  <div class="card">
+    <h1>🧱 Qwerty<span>Quest</span></h1>
+    <p class="sub">Build a city together. Your typing is your superpower.</p>
+    <label for="name">Type your builder's name</label>
+    <input id="name" maxlength="12" autocomplete="off" spellcheck="false" placeholder="name">
+    <div id="colors"></div>
+    <button id="go" class="primary">Start building ▶</button>
+    <p id="netnote" class="small">Everyone on the same Wi-Fi lands in the same city automatically.</p>
+    <p class="small">You need a real keyboard to play.</p>
+  </div>
+</div>
+
+<div id="place" class="screen hidden">
+  <div class="card wide">
+    <h2>Warm-up!</h2>
+    <p class="sub">Type what you see for one minute so we can find the right job for you. Mistakes are fine.</p>
+    <div class="meter"><div id="placebar"></div></div>
+    <div id="pfound" class="hidden"></div>
+    <div id="pprompt"></div>
+    <button id="skip" class="link">I'm brand new to typing: start me at the beginning</button>
+  </div>
+</div>
+
+<div id="wear" class="screen hidden">
+  <div class="card wide">
+    <h2>🎒 Wardrobe</h2>
+    <p class="sub">Earn new gear with clean streaks, three-star lessons and coming back on new days.</p>
+    <div id="wearlist"></div>
+    <button class="primary close">Done</button>
+  </div>
+</div>
+
+<div id="adult" class="screen hidden">
+  <div class="card wide">
+    <h2>⚙️ Grown-ups</h2>
+    <label>Level <select id="aStep"></select></label>
+    <label class="row"><input type="checkbox" id="aPacing"> Daily pacing: one new step and one counted shift per day</label>
+    <label class="row"><input type="checkbox" id="aGuide"> Show the keyboard guide</label>
+    <label>Private room code (leave empty to use this network's city)
+      <input id="aRoom" maxlength="24" autocomplete="off" spellcheck="false" placeholder="e.g. grandma"></label>
+    <div id="aStats" class="small"></div>
+    <div class="rowbtn">
+      <button id="aJoin">Join room</button>
+      <button id="aRetest">Redo the warm-up</button>
+      <button id="aReset" class="danger">Erase this player</button>
+    </div>
+    <button class="primary close">Done</button>
+  </div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
