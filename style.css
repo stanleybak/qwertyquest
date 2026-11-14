@@ -15,7 +15,8 @@ button.link { background: none; box-shadow: none; text-decoration: underline; co
 
 #hud { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; pointer-events: none; align-items: flex-start; }
 #hud > div { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.hud-mid { flex: 1; flex-direction: column; max-width: 420px; }
+.hud-mid { flex: 1 0 180px; flex-direction: column; max-width: 420px; }
+.hud-left, .hud-right { flex: 0 1 auto; }
 .hud-right { justify-content: flex-end; }
 #hud button { pointer-events: auto; font-size: 1.1rem; }
 .chip { background: #fffd; border-radius: 999px; padding: 6px 12px; font-weight: 700; box-shadow: 0 2px 0 #0002; white-space: nowrap; }
@@ -50,12 +51,12 @@ button.link { background: none; box-shadow: none; text-decoration: underline; co
 #found b, #pfound b { color: var(--bad); text-decoration: underline wavy; }
 #hint { font-size: .9rem; color: #6b6480; min-height: 1.2em; }
 
-#kb { margin-top: 8px; display: inline-flex; flex-direction: column; gap: 4px; user-select: none; }
-#kb .r { display: flex; gap: 4px; justify-content: center; }
+#kb { margin-top: 8px; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; user-select: none; }
+#kb .r { display: flex; gap: 4px; justify-content: flex-start; }
 #kb .k { width: 30px; height: 30px; border-radius: 6px; font: 700 .8rem var(--mono); display: grid; place-items: center; background: #eee; color: #554; opacity: .55; }
 #kb .k.on { opacity: 1; }
-#kb .k.wide { width: 54px; font-size: .6rem; }
-#kb .k.space { width: 190px; }
+#kb .k.wide { width: 72.5px; font-size: .6rem; } /* shift is 2.25 keys wide */
+#kb .k.space { width: 208px; }
 #kb .k.home { outline: 2px dotted #0003; outline-offset: -4px; }
 #kb .f0 { background: #ffb3b3; } #kb .f1 { background: #ffd59e; } #kb .f2 { background: #fff3a0; } #kb .f3 { background: #b8ecb0; }
 #kb .f4 { background: #aee3f5; } #kb .f5 { background: #b9c6ff; } #kb .f6 { background: #dcb8ff; } #kb .f7 { background: #ffb8e6; } #kb .f8 { background: #ddd; }
@@ -86,3 +87,5 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .item.sel { outline: 3px solid var(--accent); }
 .item small { display: block; color: #7d768f; }
 .rowbtn { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; justify-content: center; }
+
+#vol { pointer-events: auto; width: 80px; accent-color: var(--accent); }

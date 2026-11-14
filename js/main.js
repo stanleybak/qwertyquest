@@ -27,7 +27,7 @@ function beep(freq, dur = 0.07, type = 'sine', vol = 0.08, when = 0) {
     ac ||= new AudioContext();
     const o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.value = freq;
-    g.gain.setValueAtTime(vol, ac.currentTime + when);
+    g.gain.setValueAtTime(Math.max(0.0002, vol * P.vol * 1.6), ac.currentTime + when);
     g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + when + dur);
     o.connect(g).connect(ac.destination);
     o.start(ac.currentTime + when); o.stop(ac.currentTime + when + dur);
@@ -39,15 +39,30 @@ const sfx = {
   load: () => { beep(660, 0.08); beep(880, 0.1, 'sine', 0.08, 0.07); },
   win: () => [523, 659, 784, 1047].forEach((f, i) => beep(f, 0.16, 'triangle', 0.09, i * 0.1)),
 };
+// Speech uses whatever voices the device has. Pick the most natural English one.
+let voice = null;
+function pickVoice() {
+  const vs = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang));
+  const want = [/natural/i, /Google US English/i, /Samantha|Ava|Allison/i, /Aria|Jenny|Zira/i, /Google/i, /en[-_]US/i];
+  for (const re of want) {
+    const v = vs.find(x => re.test(x.name) || re.test(x.lang));
+    if (v) { voice = v; return; }
+  }
+  voice = vs[0] || null;
+}
+if (window.speechSynthesis) { pickVoice(); speechSynthesis.addEventListener?.('voiceschanged', pickVoice); }
 function say(text) {
-  if (!P.sound || !text || !window.speechSynthesis) return;
+  if (!P.sound || !P.vol || !text || !window.speechSynthesis) return;
   try {
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/;/g, 'semicolon'));
-    u.rate = 0.85; u.volume = 0.9;
+    const u = new SpeechSynthesisUtterance(text);
+    if (voice) { u.voice = voice; u.lang = voice.lang; }
+    u.rate = 0.9; u.volume = Math.min(1, P.vol * 1.3);
     speechSynthesis.speak(u);
   } catch { /* no speech */ }
 }
+// letter drills: say just the next letter, by name
+const sayLetter = c => say(c === ';' ? 'semicolon' : c === ' ' ? 'space' : c.toUpperCase());
 
 // ---------- toasts and effects ----------
 function toast(text, cls = '') {
@@ -72,11 +87,14 @@ const KB = [
   ['asdfghjkl;\'', 'ASDFGHJKL:"', [0, 1, 2, 3, 3, 4, 4, 5, 6, 7, 7]],
   ['zxcvbnm,./', 'ZXCVBNM<>?', [0, 1, 2, 3, 3, 4, 4, 5, 6, 7]],
 ];
+const KEY_PITCH = 34; // key width plus gap, in px (matches style.css)
 const keyEl = {}; // char -> { el, shift, right }
 function buildKb() {
   const kb = $('kb'); kb.innerHTML = '';
   KB.forEach(([lo, up, fing], r) => {
     const row = document.createElement('div'); row.className = 'r';
+    // real keyboards stagger the rows: Q sits 1.5 keys in, A 1.75, Z 2.25
+    row.style.paddingLeft = [0, 1.5, 1.75, 0][r] * KEY_PITCH + 'px';
     const add = (label, cls) => { const k = document.createElement('div'); k.className = 'k ' + cls; k.textContent = label; row.appendChild(k); return k; };
     if (r === 3) keyEl.shiftL = add('shift', 'wide f0');
     [...lo].forEach((c, i) => {
@@ -88,6 +106,7 @@ function buildKb() {
     kb.appendChild(row);
   });
   const row = document.createElement('div'); row.className = 'r';
+  row.style.paddingLeft = 4 * KEY_PITCH + 'px';
   const sp = document.createElement('div'); sp.className = 'k space f8 on'; sp.textContent = 'space';
   row.appendChild(sp); kb.appendChild(row);
   keyEl[' '] = { el: sp, shift: false, right: false };
@@ -131,7 +150,7 @@ function setPrompt(p, els, onDone) {
     const b = document.createElement('b'); b.textContent = p.show[p.mark]; f.append(b, p.show.slice(p.mark + 1));
   } else els.found.classList.add('hidden');
   paintPrompt();
-  if (S.tierOf(P.step) <= 2 && mode === 'game' && p.say) say(p.say);
+  if (S.tierOf(P.step) <= 2 && mode === 'game') p.spaced ? sayLetter(p.text[0]) : p.say && say(p.say);
 }
 function paintPrompt() {
   const kids = T.els.prompt.children;
@@ -154,6 +173,7 @@ function typeChar(ch) {
     sfx.key();
     if (T.pos >= T.p.text.length) { const cb = T.onDone; cb((now - T.t0) / 1000); return; }
     paintPrompt();
+    if (T.p.spaced && mode === 'game') sayLetter(T.p.text[T.pos]);
     return;
   }
   S.recordKey(P, want, false, 0);
@@ -568,7 +588,10 @@ function openAdult() {
 }
 $('btnWear').onclick = openWardrobe;
 $('btnAdult').onclick = openAdult;
-$('btnSound').onclick = () => { P.sound = !P.sound; S.saveProfile(P); if (!P.sound) window.speechSynthesis?.cancel(); };
+$('vol').value = P.vol;
+$('vol').oninput = e => { P.vol = +e.target.value; P.sound = P.vol > 0; S.saveProfile(P); };
+$('vol').onchange = e => { sfx.load(); e.target.blur(); };
+$('btnSound').onclick = () => { P.sound = !P.sound; if (P.sound && !P.vol) P.vol = 0.7; $('vol').value = P.sound ? P.vol : 0; S.saveProfile(P); if (!P.sound) window.speechSynthesis?.cancel(); };
 $('aStep').onchange = e => { P.step = +e.target.value; P.credits = 0; P.lesson = { n: 0, hit: 0, miss: 0 }; T.key = null; S.saveProfile(P); };
 $('aPacing').onchange = e => { P.pacing = e.target.checked; S.saveProfile(P); };
 $('aGuide').onchange = e => { P.guide = e.target.checked; S.saveProfile(P); };
