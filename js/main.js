@@ -1,23 +1,25 @@
 // QwertyQuest: screens, input, the typing engine, and the frame loop.
 import * as S from './skill.js';
 import { Net, findRoom } from './net.js';
-import { Host, newState, loadWorld, saveWorld, district, ZONE_R } from './world.js';
+import { Host, newState, loadWorld, saveWorld, district, ZONE_R, JOBS, onRiver } from './world.js';
 import { draw, COLORS } from './render.js';
 
 const $ = id => document.getElementById(id);
+const BUILD = '2026-11-13c';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
 let host = null;               // rules engine, present while this peer runs the game
 let net = null, roomId = null, roomLabel = '';
 let lastEv = 0, gotState = false, savedTotal = -1;
-const me = { x: 0, y: 60, face: 1, walk: false, stumble: 0, prog: 0, me: true };
+const me = { x: 0, y: 60, face: 1, walk: false, stumble: 0, prog: 0, me: true, act: -1, boat: false };
 const others = new Map();
 const held = new Set();
 let auto = null, bootsUntil = 0, bossHit = 0, lastBossHp = 0;
 const fx = [];
 const cam = { x: 0, y: 0 };
 const asked = new Set();
+let curJob = 0;
 
 // ---------- sound ----------
 let ac = null;
@@ -240,7 +242,7 @@ function nextProbe() {
       Object.assign(PL, { i: PL.i + 1, n: 0, hit: 0, miss: 0, time: 0 });
       return PL.i < S.PROBES.length ? nextProbe() : endPlacement(PL.placed);
     }
-    endPlacement(PL.i === 0 ? (acc >= 0.7 ? 2 : 0) : PL.placed);
+    endPlacement(PL.placed);
   });
 }
 function endPlacement(step) {
@@ -286,6 +288,7 @@ const handlers = {
   },
   onState(data) {
     const first = !gotState;
+    data.jobs ||= [];
     st = data; host = null; gotState = true;
     if (first) {
       lastEv = st.evId;
@@ -306,6 +309,7 @@ const handlers = {
       o.prog = Math.min(1, Math.max(0, data[2] / 100 || 0));
       o.walk = !!(data[3] & 1); if (data[3] & 2) o.stumble = 0.5;
       o.face = data[4] < 0 ? -1 : 1;
+      o.boat = !!(data[3] & 4); o.act = data[5] | 0;
       if (!o.seen) { o.x = o.tx; o.y = o.ty; o.seen = true; }
       o.at = performance.now();
     } else if (kind === 'me') applyProfile(other(from), data || {});
@@ -332,6 +336,15 @@ function handleEvents() {
     else if (ev.t === 'boss') toast('👾 A Typo Monster! Type to pelt it with bricks. Its weak spots are YOUR tricky keys.');
     else if (ev.t === 'bossWin') { toast('🏆 The Typo Monster ran away! Bonus bricks for everyone.', 'gold'); confetti(me.x, me.y - 60, 100); sfx.win(); }
     else if (ev.t === 'bossFlee') toast('The Typo Monster kicked a brick loose and wandered off.');
+    else if (ev.t === 'job') { toast('🚨 ' + JOBS[ev.jt].call); beep(880, 0.12, 'square', 0.05); beep(660, 0.12, 'square', 0.05, 0.14); }
+    else if (ev.t === 'jobGone') toast(ev.jt === 3 ? 'The brick thief got away this time.' : 'That problem sorted itself out.');
+    else if (ev.t === 'jobDone') {
+      const names = (ev.who || []).map(id => (id === net.selfId ? me.name : others.get(id)?.name)).filter(Boolean);
+      toast(`${JOBS[ev.jt].icon} ${names.join(' and ') || 'The crew'} ${JOBS[ev.jt].done}! The neighbors sent bricks to say thanks.`, 'gold');
+      ['🙋 Thank you!', '🙆 You saved the day!', '❤️', '❤️'].forEach((t, i) => setTimeout(() => floatText(t, ev.x - 60 + i * 40, ev.y - 30 - (i % 2) * 24, '#d6336c', 18), i * 350));
+      confetti(ev.x, ev.y - 40, 50); sfx.win();
+      if ((ev.who || []).includes(net.selfId)) { P.thanks++; for (const it of S.newUnlocks(P)) toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'); S.saveProfile(P); }
+    }
     else if (ev.t === 'round') setTimeout(() => { const r = S.ROLES[myRole()]; toast(`New round! Your job: ${r.icon} ${r.name}`); T.key = null; }, 300);
   }
 }
@@ -375,7 +388,7 @@ function hostTick() {
 let lastPos = '', lastPosAt = 0;
 function sendPos() {
   if (!net || !net.peers.size) return;
-  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0), me.face];
+  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0), me.face, me.act];
   const k = m.join(), now = performance.now();
   if (k === lastPos && now - lastPosAt < 1000) return;
   lastPos = k; lastPosAt = now;
@@ -393,9 +406,23 @@ function zoneAt() {
   });
   return best;
 }
+/** The city problem this player is standing at, if any. */
+function jobAt() {
+  let best = null, bd = 100;
+  for (const j of st.jobs || []) {
+    let d = Math.hypot(me.x - j.px, (me.y - j.py) / 0.7);
+    if (j.id === curJob && d < 280) d = 0; // once you have started, a wandering thief cannot shake you off easily
+    if (d < bd) { bd = d; best = j; }
+  }
+  return best;
+}
 function autoWalk() {
   const D = district(st.d);
   let best = null, bd = Infinity;
+  for (const j of st.jobs || []) {
+    const d = Math.hypot(me.x - j.px, me.y - j.py) * 0.6; // problems are a bit more tempting than bricks
+    if (d < bd) { bd = d; best = { x: j.px, y: j.py, job: j.id }; }
+  }
   D.sites.forEach((s, k) => {
     if (st.have[k] >= s.need) return;
     const d = Math.hypot(me.x - s.x, me.y - s.y - 48);
@@ -408,9 +435,11 @@ function finishPrompt(secs) {
   const boss = T.key === 'boss', p = T.p;
   const n = P.crane > 0 ? 2 : 1;
   if (P.crane > 0) P.crane--;
-  net.toHost('done', { site: T.site, clean: T.clean, boss, n });
+  const job = T.key.startsWith('j') ? +T.key.slice(1) : 0;
+  net.toHost('done', { site: T.site, clean: T.clean, boss, n, job });
   sfx.load();
-  if (boss && st.boss) fx.push({ text: '🧱', x: me.x, y: me.y - 60, vx: (st.boss.x - me.x) * 2.5, vy: (st.boss.y - 80 - me.y + 60) * 2.5, life: 0.4, size: 26 });
+  if (job) { P.crane += n - 1; floatText(['💦 splash!', '🔧 clank!', '🪜 up!', '🚨 stop!'][T.jobType] || '👍', me.x, me.y - 100, '#2f7de1'); }
+  else if (boss && st.boss) fx.push({ text: '🧱', x: me.x, y: me.y - 60, vx: (st.boss.x - me.x) * 2.5, vy: (st.boss.y - 80 - me.y + 60) * 2.5, life: 0.4, size: 26 });
   else floatText(n === 2 ? '+2 🧱' : '+1 🧱', me.x, me.y - 100, '#c8553d');
   if (T.clean) {
     P.streak++; P.bestStreak = Math.max(P.bestStreak, P.streak);
@@ -437,10 +466,12 @@ function finishPrompt(secs) {
 }
 
 function updatePrompt() {
-  const zone = st.boss ? -1 : zoneAt();
-  const key = st.boss ? 'boss' : zone >= 0 ? `s${st.d}:${zone}:${myRole()}` : null;
+  const job = st.boss ? null : jobAt();
+  const zone = st.boss || job ? -1 : zoneAt();
+  const key = st.boss ? 'boss' : job ? `j${job.id}` : zone >= 0 ? `s${st.d}:${zone}:${myRole()}` : null;
+  me.act = job ? job.t : -1; curJob = job ? job.id : 0;
   if (key !== T.key || (key && !T.p)) {
-    const wasSite = T.key && T.key !== 'boss' && T.site >= 0 && st.have[T.site] >= district(st.d).sites[T.site].need || (T.key && T.key.startsWith('s') && !T.key.startsWith(`s${st.d}:`));
+    const wasSite = T.key && T.key.startsWith('s') && T.site >= 0 && st.have[T.site] >= district(st.d).sites[T.site].need || (T.key && T.key.startsWith('s') && !T.key.startsWith(`s${st.d}:`));
     T.key = key; T.site = zone;
     const els = { prompt: $('prompt'), found: $('found') };
     if (!key) {
@@ -448,16 +479,39 @@ function updatePrompt() {
       setPrompt(null, els, null);
       $('hint').textContent = 'Walk to a glowing circle with the arrow keys, or press Enter to go to the nearest one.';
     } else {
-      const role = st.boss ? 0 : myRole();
+      const role = st.boss || job ? 0 : myRole();
+      T.jobType = job ? job.t : -1;
       const p = S.genPrompt(P, role, !!st.boss);
       setPrompt(p, els, finishPrompt);
       $('hint').textContent = st.boss ? 'Throw bricks at the Typo Monster!'
+        : job ? JOBS[job.t].hint
         : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
           : p.perfect ? 'Perfect run: one slip sends you back to the start.'
             : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : '';
     }
   }
   return zone;
+}
+
+// Builders we have actually heard from lately. A closed tab can linger in the
+// mesh for a while, so the connection list alone overcounts.
+const liveOthers = now => [...others.values()].filter(o => o.seen && now - o.at < 6000);
+
+function debugInfo() {
+  const now = performance.now(), short = id => (id || '').slice(0, 6);
+  return JSON.stringify({
+    build: BUILD, time: new Date().toISOString(), room: roomLabel, roomId: short(roomId),
+    self: short(net?.selfId), host: short(net?.hostId), isHost: net?.isHost, ready: net?.ready,
+    order: (net?.order || []).map(short),
+    peers: [...(net?.peers || [])].map(id => {
+      const o = others.get(id);
+      return { id: short(id), name: o?.name, seen: !!o?.seen, posAgeMs: o?.at ? Math.round(now - o.at) : null };
+    }),
+    hostHeardAgeMs: net?.heard ? Math.round(now - net.heard) : null,
+    city: { d: st.d, have: st.have, total: st.total, boss: !!st.boss, jobs: (st.jobs || []).map(j => `${JOBS[j.t].name}:${j.hp}`), roles: Object.values(st.roles || {}) },
+    player: { step: P.step, lessonsToday: P.day.lessons, credits: P.credits },
+    ua: navigator.userAgent,
+  }, null, 1);
 }
 
 let hudAt = 0;
@@ -475,7 +529,7 @@ function updateHud(now) {
   const done = Math.min(S.SHIFT_LESSONS, P.day.lessons);
   $('shift').textContent = (P.pacing ? `Shift ${'●'.repeat(done)}${'○'.repeat(S.SHIFT_LESSONS - done)}` : `Lessons ${P.day.lessons}`) + ` · ${P.lesson.n}/${S.LESSON_LEN}`;
   $('powers').textContent = `🛡️${P.shields} 🏗️${P.crane}` + (now < bootsUntil ? ' 👟' : '') + ` 🔥${P.streak}`;
-  $('crew').textContent = !net.ready ? '🔎 looking for builders…' : `👷 ${1 + others.size} in ${roomLabel}` + (net.isHost && others.size ? ' ★' : '');
+  $('crew').textContent = !net.ready ? '🔎 looking for builders…' : `👷 ${1 + liveOthers(now).length} in ${roomLabel}` + (net.isHost && others.size ? ' ★' : '');
   $('btnSound').textContent = P.sound ? '🔊' : '🔇';
 }
 
@@ -500,15 +554,17 @@ function frame(now) {
   let dy = (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
   if (auto && !dx && !dy) {
     const ax = auto.x - me.x, ay = auto.y - me.y, d = Math.hypot(ax, ay);
-    if (d < 8) auto = null; else { dx = ax / d; dy = ay / d; }
+    if (d < (auto.job ? 40 : 8)) auto = null; else { dx = ax / d; dy = ay / d; }
   }
   me.walk = !!(dx || dy);
   if (me.walk) {
-    const len = Math.hypot(dx, dy), sp = (now < bootsUntil ? 360 : 240) * (me.stumble > 0 ? 0.3 : 1);
+    const len = Math.hypot(dx, dy), sp = (now < bootsUntil ? 360 : 240) * (me.stumble > 0 ? 0.3 : 1) * (me.boat ? 0.6 : 1);
     me.x += dx / len * sp * dt; me.y += dy / len * sp * dt;
     if (Math.abs(dx) > 0.1) me.face = dx > 0 ? 1 : -1;
   }
   me.stumble = Math.max(0, me.stumble - dt);
+  me.boat = onRiver(me.x, me.y, st.d);
+  if (auto?.job) { const j = st.jobs.find(x => x.id === auto.job); if (j) { auto.x = j.px; auto.y = j.py; } else auto = null; }
   for (const o of others.values()) {
     o.x += (o.tx - o.x) * Math.min(1, dt * 12); o.y += (o.ty - o.y) * Math.min(1, dt * 12);
     o.stumble = Math.max(0, o.stumble - dt);
@@ -532,8 +588,8 @@ function frame(now) {
   cam.x += (me.x - cam.x) * Math.min(1, dt * 6);
   cam.y += (me.y - 50 + $('panel').offsetHeight / 2 - cam.y) * Math.min(1, dt * 6);
   draw(ctx, {
-    w: vw, h: vh, cam, st, t: now / 1000, me, others: [...others.values()].filter(o => o.seen && now - o.at < 6000),
-    zone, weak: st.boss ? S.weakKeys(P, 4) : [], bossHit, fx,
+    w: vw, h: vh, cam, st, t: now / 1000, me, others: liveOthers(now),
+    zone, job: curJob, weak: st.boss ? S.weakKeys(P, 4) : [], bossHit, fx,
   });
   updateHud(now);
 }
@@ -595,6 +651,10 @@ $('btnSound').onclick = () => { P.sound = !P.sound; if (P.sound && !P.vol) P.vol
 $('aStep').onchange = e => { P.step = +e.target.value; P.credits = 0; P.lesson = { n: 0, hit: 0, miss: 0 }; T.key = null; S.saveProfile(P); };
 $('aPacing').onchange = e => { P.pacing = e.target.checked; S.saveProfile(P); };
 $('aGuide').onchange = e => { P.guide = e.target.checked; S.saveProfile(P); };
+$('aDebug').onclick = () => {
+  const out = $('aDebugOut'); out.value = debugInfo(); out.classList.remove('hidden'); out.select();
+  navigator.clipboard?.writeText(out.value).then(() => toast('Debug info copied.'), () => {});
+};
 $('aJoin').onclick = () => { const c = $('aRoom').value.trim(); location.hash = c ? 'room=' + encodeURIComponent(c) : ''; location.reload(); };
 $('aRetest').onclick = () => { P.placed = false; S.saveProfile(P); location.reload(); };
 $('aReset').onclick = () => { if (confirm('Erase this player\'s progress on this device?')) { S.resetProfile(); location.reload(); } };

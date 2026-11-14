@@ -89,3 +89,5 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .rowbtn { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; justify-content: center; }
 
 #vol { pointer-events: auto; width: 80px; accent-color: var(--accent); }
+
+#aDebugOut { width: 100%; margin-top: 10px; font: .72rem var(--mono); border-radius: 10px; border: 2px solid #d9d2c3; padding: 8px; }

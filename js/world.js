@@ -41,6 +41,26 @@ const KINDS = [
   { name: 'landmark', floors: 7, need: 16, w: 150 },
 ];
 const cache = new Map();
+const cellIdx = new Map(); // "gx,gy" -> district index, for districts made so far
+
+/** Every third district has a river where its road would be. */
+export const hasRiver = i => i % 3 === 2;
+/** Is this spot open water? Finished districts get a bridge in the middle. */
+export function onRiver(x, y, d) {
+  const i = cellIdx.get(`${Math.round(x / CELL_W)},${Math.round(y / CELL_H)}`);
+  if (i === undefined || i > d || !hasRiver(i)) return false;
+  const D = district(i);
+  if (y - D.cy < 18 || y - D.cy > 66 || Math.abs(x - D.cx) > CELL_W / 2 - 14) return false;
+  return !(i < d && Math.abs(x - D.cx) < 70);
+}
+
+// City problems that pop up and need typing to fix.
+export const JOBS = [
+  { name: 'fire', icon: '🔥', tool: '🧯', call: 'Fire! Grab a hose and help put it out.', done: 'put out the fire', hint: 'Spray the fire!' },
+  { name: 'leak', icon: '💦', tool: '🔧', call: 'A pipe burst! Somebody fix that leak.', done: 'fixed the leak', hint: 'Tighten the pipe!' },
+  { name: 'cat', icon: '🐱', tool: '🪜', call: 'A kitten is stuck up a tree!', done: 'rescued the kitten', hint: 'Climb the ladder!' },
+  { name: 'thief', icon: '🦹', tool: '🚨', call: 'A brick thief is on the loose! Catch up and stop them.', done: 'caught the brick thief', hint: 'Stop, thief!' },
+];
 /** The six building sites of district i. Same answer on every peer. */
 export function district(i) {
   if (cache.has(i)) return cache.get(i);
@@ -58,8 +78,9 @@ export function district(i) {
       hue: Math.floor(r() * 360), roof: Math.floor(r() * 3),
     });
   }
-  const d = { i, cx, cy, sites, name: districtName(i) };
+  const d = { i, cx, cy, sites, name: districtName(i), river: hasRiver(i) };
   cache.set(i, d);
+  cellIdx.set(`${c.x},${c.y}`, i);
   return d;
 }
 
@@ -68,6 +89,7 @@ export function newState() {
     d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, combo: 0,
     boss: null, bossIn: 150, round: 0, roundLeft: 120,
     roles: {}, order: [], items: [], itemId: 1, ev: [], evId: 0,
+    jobs: [], jobId: 1, jobIn: 20,
   };
 }
 const saveKey = room => 'qq.world.' + (room || 'solo');
@@ -84,7 +106,35 @@ export function saveWorld(room, st) {
 
 /** Host-side rules. `st` is the live state object; mutate it in place. */
 export class Host {
-  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 12; }
+  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 12; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 20; }
+
+  /** Start a city problem: at a finished building if there is one, else out in the open. */
+  spawnJob() {
+    const st = this.st, D = district(st.d);
+    const built = [];
+    for (let i = Math.max(0, st.d - 3); i <= st.d; i++) {
+      district(i).sites.forEach((s, k) => { if (i < st.d || st.have[k] >= s.need) built.push(s); });
+    }
+    const taken = t => st.jobs.some(j => j.t === t);
+    let types = [2, 3];
+    if (built.length) types = [0, 0, 1, 2, 3];
+    types = types.filter(t => !taken(t));
+    if (!types.length) return;
+    const t = types[Math.floor(Math.random() * types.length)];
+    const hp = (t === 0 ? 4 : 3) + this.players();
+    const j = { id: st.jobId++, t, hp, max: hp, left: 100, who: [] };
+    if (t < 2) {
+      const s = built[Math.floor(Math.random() * built.length)];
+      Object.assign(j, { x: Math.round(s.x), y: Math.round(s.y), h: s.floors * 28, px: Math.round(s.x), py: Math.round(s.y + 48) });
+    } else {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      j.x = D.cx + side * (300 + Math.random() * 60); j.y = D.cy + (D.river ? -20 : 120);
+      j.px = j.x; j.py = j.y + (t === 2 ? 26 : 0);
+      if (t === 3) { j.tx = j.x; j.ty = j.y; j.stun = 0; }
+    }
+    st.jobs.push(j);
+    this.event('job', { jt: t });
+  }
 
   event(t, extra = {}) {
     this.st.ev.push({ id: ++this.st.evId, t, ...extra });
@@ -135,6 +185,20 @@ export class Host {
       st.combo += 0.035 + 0.065 * frac;
     } else st.combo = Math.max(0, st.combo - 0.12);
     if (st.combo >= 1) { st.combo = 0; this.event('gold'); this.sprinkle(1); }
+    if (m.job) {
+      const i = st.jobs.findIndex(j => j.id === m.job);
+      if (i < 0) return;
+      const j = st.jobs[i];
+      j.hp--; if (!j.who.includes(from)) j.who.push(from);
+      if (j.t === 3) j.stun = 5;
+      if (j.hp <= 0) {
+        st.jobs.splice(i, 1);
+        this.event('jobDone', { jt: j.t, x: j.px, y: j.py, who: j.who });
+        st.combo += 0.15;
+        this.sprinkle(1); // grateful neighbors chip in bricks
+      }
+      return;
+    }
     if (st.boss && m.boss) {
       st.boss.hp -= 1;
       if (st.boss.hp <= 0) { st.boss = null; st.bossIn = 240; this.event('bossWin'); this.sprinkle(2); }
@@ -154,7 +218,7 @@ export class Host {
     if (!w || typeof w.total !== 'number' || w.total <= this.st.total) return;
     if (!Number.isInteger(w.d) || w.d < 0 || !Array.isArray(w.have) || w.have.length !== 6) return;
     this.st.d = w.d; this.st.have = w.have.map(n => Math.max(0, n | 0)); this.st.total = w.total;
-    this.st.boss = null; this.st.items = [];
+    this.st.boss = null; this.st.items = []; this.st.jobs = [];
   }
 
   tick(dt) {
@@ -174,12 +238,29 @@ export class Host {
       st.boss = { hp, max: hp, left: 80, x: D.cx, y: D.cy + 40 };
       this.event('boss');
     }
+    for (let i = st.jobs.length - 1; i >= 0; i--) {
+      const j = st.jobs[i];
+      if (j.t === 3) { // the thief scurries between spots, and freezes when caught up with
+        if (j.stun > 0) j.stun -= dt;
+        else {
+          const dx = j.tx - j.x, dy = j.ty - j.y, L = Math.hypot(dx, dy);
+          if (L < 10) { j.tx = D.cx + (Math.random() - 0.5) * 660; j.ty = D.cy + (D.river ? -70 + Math.random() * 70 : Math.random() * 120); }
+          else { j.x += dx / L * 55 * dt; j.y += dy / L * 55 * dt; }
+          j.px = j.x = Math.round(j.x * 10) / 10; j.py = j.y = Math.round(j.y * 10) / 10;
+        }
+      }
+      if ((j.left -= dt) <= 0) { st.jobs.splice(i, 1); this.event('jobGone', { jt: j.t }); }
+    }
+    if (st.total >= 3 && !st.boss && (st.jobIn -= dt) <= 0) {
+      st.jobIn = 40;
+      if (st.jobs.length < 2) this.spawnJob();
+    }
     if ((this.itemIn -= dt) <= 0) {
       this.itemIn = 18;
       if (st.items.length < 3) {
         st.items.push({
           id: st.itemId++, t: Math.floor(Math.random() * 3),
-          x: D.cx + (Math.random() - 0.5) * 640, y: D.cy + 40 + (Math.random() - 0.5) * 60,
+          x: D.cx + (Math.random() - 0.5) * 640, y: D.cy + (D.river ? 100 : 40) + (Math.random() - 0.5) * 60,
         });
       }
     }

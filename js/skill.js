@@ -41,6 +41,7 @@ export const ITEMS = [
   { id: 'h2', slot: 'hat', e: '🎩', name: 'Top hat', how: '3 three-star lessons', ok: p => p.stars3 >= 3 },
   { id: 'h3', slot: 'hat', e: '🤠', name: 'Cowboy hat', how: '25 clean loads in a row', ok: p => p.bestStreak >= 25 },
   { id: 'h4', slot: 'hat', e: '🎓', name: 'Grad cap', how: '10 three-star lessons', ok: p => p.stars3 >= 10 },
+  { id: 'h6', slot: 'hat', e: '🪖', name: 'Rescue helmet', how: 'Help fix 5 city problems', ok: p => p.thanks >= 5 },
   { id: 'h5', slot: 'hat', e: '👑', name: 'Crown', how: 'Become mayor', ok: p => p.stars3 >= 25 },
   { id: 't0', slot: 'tool', e: '🔨', name: 'Hammer', how: 'Yours from the start', ok: () => true },
   { id: 't1', slot: 'tool', e: '🔧', name: 'Wrench', how: '5 clean loads in a row', ok: p => p.bestStreak >= 5 },
@@ -54,6 +55,7 @@ export const ITEMS = [
   { id: 'p4', slot: 'pet', e: '🐢', name: 'Turtle', how: 'A lesson with no mistakes', ok: p => p.perfect >= 1 },
   { id: 'p5', slot: 'pet', e: '🦖', name: 'Dino', how: '40 clean loads in a row', ok: p => p.bestStreak >= 40 },
   { id: 'p6', slot: 'pet', e: '🦄', name: 'Unicorn', how: '20 three-star lessons', ok: p => p.stars3 >= 20 },
+  { id: 'p7', slot: 'pet', e: '🐕‍🦺', name: 'Rescue dog', how: 'Help fix 20 city problems', ok: p => p.thanks >= 20 },
   { id: 'r0', slot: 'ride', e: '', name: 'On foot', how: '', ok: () => true },
   { id: 'r1', slot: 'ride', e: '🛴', name: 'Scooter', how: '20 clean loads in a row', ok: p => p.bestStreak >= 20 },
   { id: 'r2', slot: 'ride', e: '🛹', name: 'Skateboard', how: '7 three-star lessons', ok: p => p.stars3 >= 7 },
@@ -78,7 +80,7 @@ export function loadProfile() {
   p = Object.assign({
     name: '', color: 0, step: 0, placed: false, credits: 0, badRun: 0,
     lesson: { n: 0, hit: 0, miss: 0 }, keys: {}, streak: 0, bestStreak: 0,
-    stars3: 0, perfect: 0, days: 0, loads: 0, shields: 0, crane: 0,
+    stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, shields: 0, crane: 0,
     wear: { hat: 'h0', tool: 't0', pet: 'p0', ride: 'r0' }, seen: ['h0', 't0', 'p0', 'r0'],
     day: { date: '', lessons: 0, promoted: false }, pacing: true, guide: true, sound: true, vol: 0.7,
   }, p || {});
@@ -302,8 +304,12 @@ export function lessonPrompt(p) {
 
 // ---------- placement ----------
 // Probes climb the ladder. Passing a probe places the player past it.
+// The first probes are gentle: one key at a time, then short home-row drills.
 export const PROBES = [
-  { step: 4, n: 3, cps: 0.5, place: 5 },
+  { step: 0, n: 5, cps: 0.25, place: 0, single: 'asdfjkl' },
+  { step: 2, n: 3, cps: 0.4, place: 3, drill: true },
+  { step: 4, n: 3, cps: 0.5, place: 5, drill: true },
+  { step: 4, n: 3, cps: 0.6, place: 5, word: true },
   { step: 9, n: 3, cps: 0.8, place: 10 },
   { step: 14, n: 3, cps: 1.0, place: NS },
   { step: NS, n: 2, cps: 1.3, place: NS + 1 },
@@ -312,5 +318,8 @@ export const PROBES = [
 ];
 export function probePrompt(p, probe) {
   const fake = { ...p, step: probe.step, keys: p.keys };
+  if (probe.single) return { text: pick(probe.single.split('')), spaced: true };
+  if (probe.drill) return { text: letters(fake, 3, false), spaced: true };
+  if (probe.word) return { text: pick(wordsUpTo(probe.step).filter(w => w.length >= 3)) };
   return genPrompt(fake, probe.step < 5 ? 0 : 1, false);
 }

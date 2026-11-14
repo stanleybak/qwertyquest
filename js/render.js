@@ -1,5 +1,5 @@
 // Canvas drawing. Pure view code: reads state, never changes it.
-import { district, CELL_W, CELL_H, ZONE_R } from './world.js';
+import { district, CELL_W, CELL_H, ZONE_R, JOBS } from './world.js';
 
 export const COLORS = ['#ff6b6b', '#ff9f43', '#feca57', '#1dd1a1', '#48dbfb', '#5f7cff', '#c56cf0', '#ff78c4'];
 const ITEM_EMOJI = ['🛡️', '🏗️', '👟'];
@@ -32,11 +32,26 @@ function drawGround(ctx, v) {
     const x = D.cx - cam.x + w / 2, y = D.cy - cam.y + h / 2;
     ctx.fillStyle = i === st.d ? '#f3e2b8' : '#e9dcc0';
     rr(ctx, x - CELL_W / 2 + 14, y - CELL_H / 2 + 14, CELL_W - 28, CELL_H - 28, 36); ctx.fill();
-    ctx.fillStyle = '#b9b3a8';
-    ctx.fillRect(x - CELL_W / 2 + 14, y + 20, CELL_W - 28, 44);
-    ctx.strokeStyle = '#fff9'; ctx.lineWidth = 3; ctx.setLineDash([18, 16]);
-    ctx.beginPath(); ctx.moveTo(x - CELL_W / 2 + 30, y + 42); ctx.lineTo(x + CELL_W / 2 - 30, y + 42); ctx.stroke();
-    ctx.setLineDash([]);
+    if (D.river) {
+      ctx.fillStyle = '#5db7f0';
+      ctx.fillRect(x - CELL_W / 2 + 14, y + 18, CELL_W - 28, 48);
+      ctx.strokeStyle = '#fff8'; ctx.lineWidth = 2;
+      for (let k = 0; k < 9; k++) {
+        const wx = x - CELL_W / 2 + 50 + k * 90 + Math.sin(v.t + k) * 12, wy = y + 30 + (k % 3) * 12;
+        ctx.beginPath(); ctx.moveTo(wx, wy); ctx.quadraticCurveTo(wx + 9, wy - 6, wx + 18, wy); ctx.stroke();
+      }
+      if (i < st.d) { // finished districts get a bridge
+        ctx.fillStyle = '#b07a4a'; ctx.fillRect(x - 70, y + 12, 140, 60);
+        ctx.strokeStyle = '#7a4f2a'; ctx.lineWidth = 3; ctx.strokeRect(x - 70, y + 12, 140, 60);
+        for (let k = -60; k <= 60; k += 20) { ctx.beginPath(); ctx.moveTo(x + k, y + 12); ctx.lineTo(x + k, y + 72); ctx.stroke(); }
+      }
+    } else {
+      ctx.fillStyle = '#b9b3a8';
+      ctx.fillRect(x - CELL_W / 2 + 14, y + 20, CELL_W - 28, 44);
+      ctx.strokeStyle = '#fff9'; ctx.lineWidth = 3; ctx.setLineDash([18, 16]);
+      ctx.beginPath(); ctx.moveTo(x - CELL_W / 2 + 30, y + 42); ctx.lineTo(x + CELL_W / 2 - 30, y + 42); ctx.stroke();
+      ctx.setLineDash([]);
+    }
     ctx.fillStyle = '#0005'; ctx.font = '700 15px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(D.name.toUpperCase(), x, y - CELL_H / 2 + 34);
   }
@@ -117,9 +132,10 @@ function drawPlayer(ctx, p, x, y, t) {
   ctx.fillStyle = '#0003';
   ctx.beginPath(); ctx.ellipse(x, y, 17, 6, 0, 0, 7); ctx.fill();
   if (p.pet) emoji(ctx, p.pet, x - p.face * 34, y - 12 - Math.abs(Math.sin(t * 6 + 1)) * (p.walk ? 6 : 2), 24);
-  if (p.ride) emoji(ctx, p.ride, x, y - 8, 34);
+  const ride = p.boat ? '🛶' : p.ride;
+  if (ride) emoji(ctx, ride, x, y - 8, p.boat ? 46 : 34);
   ctx.save();
-  ctx.translate(x, y - (p.ride ? 10 : 0) - bob); ctx.rotate(wob);
+  ctx.translate(x, y - (ride ? 10 : 0) - bob); ctx.rotate(wob);
   // legs
   ctx.fillStyle = '#3a3350';
   const step = p.walk ? Math.sin(t * 14) * 4 : 0;
@@ -139,7 +155,8 @@ function drawPlayer(ctx, p, x, y, t) {
   // hat
   if (p.hat) emoji(ctx, p.hat, 0, -66, 24);
   else { ctx.fillStyle = '#ffcc00'; ctx.beginPath(); ctx.arc(0, -56, 13, Math.PI, 0); ctx.fill(); ctx.fillRect(-16, -58, 32, 4); }
-  if (p.tool) emoji(ctx, p.tool, p.face * 20, -26 + (p.prog > 0 ? Math.sin(t * 20) * 4 : 0), 18);
+  const tool = p.act >= 0 && JOBS[p.act] ? JOBS[p.act].tool : p.tool;
+  if (tool) emoji(ctx, tool, p.face * 20, -26 + (p.prog > 0 ? Math.sin(t * 20) * 4 : 0), 18);
   // the brick being typed into existence
   if (p.prog > 0) {
     const bw = 8 + 20 * p.prog;
@@ -153,6 +170,36 @@ function drawPlayer(ctx, p, x, y, t) {
   const tw = ctx.measureText(label).width + 12;
   ctx.fillStyle = p.me ? '#2b2340' : '#2b2340aa'; rr(ctx, x - tw / 2, y + 8, tw, 18, 9); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.fillText(label, x, y + 18);
+}
+
+/** A city problem: fire, leak, stuck kitten, or brick thief. */
+function drawJob(ctx, j, x, y, t, near) {
+  const f = j.hp / j.max;
+  let top = y - 70;
+  if (j.t === 0) {
+    top = y - j.h - 60;
+    for (let k = 0; k < 3; k++) emoji(ctx, '🔥', x + (k - 1) * 30, y - j.h - 6 + Math.sin(t * 9 + k * 2) * 4, 22 + 26 * f);
+    emoji(ctx, '💨', x + Math.sin(t) * 20, y - j.h - 50 - (t * 30 % 30), 22);
+  } else if (j.t === 1) {
+    for (let k = 0; k < 4; k++) emoji(ctx, '💦', x + 40 + Math.sin(t * 5 + k) * 14, y - 14 - ((t * 60 + k * 17) % 50) * f, 14 + 12 * f);
+    ctx.fillStyle = '#5db7f099'; ctx.beginPath(); ctx.ellipse(x + 40, y + 8, 30 + 26 * f, 9, 0, 0, 7); ctx.fill();
+  } else if (j.t === 2) {
+    emoji(ctx, '🌳', x, y - 44, 96);
+    emoji(ctx, '🐱', x + 8, y - 84 + (1 - f) * 50 + Math.sin(t * 5) * 2, 26);
+    emoji(ctx, '🪜', x + 30, y - 22, 40);
+    top = y - 116;
+  } else {
+    const run = j.stun > 0 ? 0 : Math.abs(Math.sin(t * 12)) * 6;
+    ctx.fillStyle = '#0003'; ctx.beginPath(); ctx.ellipse(x, y, 16, 6, 0, 0, 7); ctx.fill();
+    emoji(ctx, '🦹', x, y - 26 - run, 44);
+    emoji(ctx, '🧱', x + 20, y - 14 - run, 18);
+    if (j.stun > 0) emoji(ctx, '💫', x, y - 58, 20);
+  }
+  const bw = 70;
+  ctx.fillStyle = '#fff'; rr(ctx, x - bw / 2, top - 9, bw, 18, 9); ctx.fill();
+  ctx.fillStyle = '#e5484d'; rr(ctx, x - bw / 2 + 2, top - 7, Math.max(6, (bw - 4) * f), 14, 7); ctx.fill();
+  emoji(ctx, JOBS[j.t].icon, x - bw / 2 - 10, top, 20);
+  if (j.t !== 3) drawZone(ctx, x + (j.px - j.x), y + (j.py - j.y), near, t);
 }
 
 function drawBoss(ctx, b, x, y, t, weak, hit) {
@@ -210,6 +257,7 @@ export function draw(ctx, v) {
       emoji(ctx, ITEM_EMOJI[it.t], sx(it.x), sy(it.y) - 22 - Math.sin(t * 4 + it.id) * 5, 30);
     } });
   }
+  for (const j of st.jobs || []) things.push({ y: j.y + 1, f: () => drawJob(ctx, j, sx(j.x), sy(j.y), t, v.job === j.id) });
   for (const p of [...v.others, v.me]) things.push({ y: p.y, f: () => drawPlayer(ctx, p, sx(p.x), sy(p.y), t) });
   if (st.boss) things.push({ y: st.boss.y, f: () => drawBoss(ctx, st.boss, sx(st.boss.x), sy(st.boss.y), t, v.weak, v.bossHit) });
   things.sort((a, b) => a.y - b.y).forEach(o => o.f());
@@ -224,6 +272,16 @@ export function draw(ctx, v) {
   }
   ctx.globalAlpha = 1;
 
+  // red arrows point at city problems that are off screen
+  for (const j of st.jobs || []) {
+    const jx = j.px - cam.x, jy = j.py - cam.y;
+    if (Math.abs(jx) < w / 2 && Math.abs(jy) < h / 2) continue;
+    const a = Math.atan2(jy, jx), r = Math.min(w, h) / 2 - 110;
+    emoji(ctx, JOBS[j.t].icon, w / 2 + Math.cos(a) * r, h / 2 + Math.sin(a) * r, 30);
+    ctx.save(); ctx.translate(w / 2 + Math.cos(a) * (r + 34), h / 2 + Math.sin(a) * (r + 34)); ctx.rotate(a);
+    ctx.fillStyle = '#e5484d'; ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(-8, -11); ctx.lineTo(-8, 11); ctx.fill();
+    ctx.restore();
+  }
   // arrow back to the building site when it is off screen
   const D = district(st.d);
   const dx = D.cx - cam.x, dy = D.cy + 40 - cam.y;
