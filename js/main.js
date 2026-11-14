@@ -9,7 +9,7 @@ import * as G from './games.js';
 import DATA from './content-data.js';
 
 const $ = id => document.getElementById(id);
-const BUILD = '2026-11-14g';
+const BUILD = '2026-11-14h';
 const P = S.loadProfile();
 let mode = 'start';            // start | place | game
 let st = newState();           // shared city state (host-owned)
@@ -37,6 +37,7 @@ function beep(freq, dur = 0.07, type = 'sine', vol = 0.08, when = 0) {
   if (!P.sound) return;
   try {
     ac ||= new AudioContext();
+    if (ac.state === 'suspended') ac.resume(); // after a reload the browser waits for a key press
     const o = ac.createOscillator(), g = ac.createGain();
     o.type = type; o.frequency.value = freq;
     g.gain.setValueAtTime(Math.max(0.0002, vol * P.vol * 1.6), ac.currentTime + when);
@@ -694,19 +695,53 @@ function paintAsks() {
 }
 
 // ---------- the game ----------
+/** Save the player, including where they stand, so a reload puts them back. */
+function saveAll() {
+  if (mode === 'game' && net?.world) P.pos = { w: net.world.id, x: Math.round(me.x), y: Math.round(me.y), f: me.face };
+  S.saveProfile(P);
+}
+
+// ---------- updates ----------
+// version.json holds a hash of the game's files. When it changes, a newer
+// game has been published: offer it, and come back to the same spot after.
+let myVersion = null;
+function reloadInPlace() {
+  saveAll();
+  if (net?.world && host) saveWorld(net.world, st);
+  try { sessionStorage.setItem('qq.resume', '1'); } catch { /* ignore */ }
+  location.reload();
+}
+async function checkVersion() {
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    const v = (await r.json()).hash;
+    if (!v) return;
+    if (!myVersion) { myVersion = v; return; }
+    if (v === myVersion || !$('update').classList.contains('hidden')) return;
+    if (mode !== 'game') { if (mode !== 'place') reloadInPlace(); return; } // nothing to interrupt yet
+    $('update').classList.remove('hidden');
+    beep(660, 0.1, 'sine', 0.06); beep(990, 0.14, 'sine', 0.06, 0.1);
+  } catch { /* offline, or no version file: try again later */ }
+}
+checkVersion(); setInterval(checkVersion, 20000);
+
 function enterCity() {
   mode = 'game';
   $('lobby').classList.add('hidden');
   $('hud').classList.remove('hidden'); $('panel').classList.remove('hidden');
   saveWorld(net.world, st); savedTotal = st.total; // remember this city (and its key) from the first moment
-  const D = district(st.d);
-  me.x = D.cx + (Math.random() - 0.5) * 300; me.y = D.cy + 45; cam.x = me.x; cam.y = me.y;
+  const D = district(st.d), at = P.pos;
+  // back where this player was standing, if that spot is still part of this city
+  if (at && at.w === net.world.id && Number.isFinite(at.x) && Number.isFinite(at.y) && walkable(at.x, at.y, st.d)) { me.x = at.x; me.y = at.y; me.face = at.f < 0 ? -1 : 1; }
+  else { me.x = D.cx + (Math.random() - 0.5) * 300; me.y = D.cy + 45; }
+  cam.x = me.x; cam.y = me.y;
   if (!roomId) toast('Could not reach the network. Playing solo for now.');
   else toast(`Welcome to ${net.world.name}!`, 'gold');
   if (timersOn) return;
   timersOn = true;
   setInterval(hostTick, 250);
-  setInterval(() => { if (net.world && st.total !== savedTotal) { savedTotal = st.total; saveWorld(net.world, st); } S.saveProfile(P); }, 4000);
+  setInterval(() => { if (net.world && st.total !== savedTotal) { savedTotal = st.total; saveWorld(net.world, st); } saveAll(); }, 4000);
+  addEventListener('pagehide', saveAll);
   setInterval(sendPos, 100);
   requestAnimationFrame(frame);
   setTimeout(() => toast('Arrow keys to walk. Press Enter at a glowing circle to start typing.'), 2500);
@@ -1015,7 +1050,7 @@ const liveOthers = now => [...others.values()].filter(o => o.seen && now - o.at 
 function debugInfo() {
   const now = performance.now(), short = id => (id || '').slice(0, 6);
   return JSON.stringify({
-    build: BUILD, time: new Date().toISOString(), room: roomLabel, roomId: short(roomId), city: net?.world?.name, citiesSeen: [...(net?.worlds.values() || [])].map(w => w.name),
+    build: BUILD, version: myVersion, time: new Date().toISOString(), room: roomLabel, roomId: short(roomId), city: net?.world?.name, citiesSeen: [...(net?.worlds.values() || [])].map(w => w.name),
     self: short(net?.selfId), host: short(net?.hostId), isHost: net?.isHost, ready: net?.ready,
     order: (net?.order || []).map(short),
     peers: [...(net?.peers || [])].map(id => {
@@ -1258,5 +1293,10 @@ $('aReset').onclick = () => { if (confirm('Erase this player\'s progress on this
 document.querySelectorAll('.screen .close').forEach(b => { b.onclick = () => { b.closest('.screen').classList.add('hidden'); b.blur(); }; });
 document.querySelectorAll('#hud button').forEach(b => b.addEventListener('click', () => b.blur()));
 
+$('updateGo').onclick = reloadInPlace;
 initStart();
+// coming back from an update: skip the start screen and walk straight back in
+let resume = false;
+try { resume = !!sessionStorage.getItem('qq.resume'); sessionStorage.removeItem('qq.resume'); } catch { /* ignore */ }
+if (resume && P.name && P.placed) { $('start').classList.add('hidden'); startGame(); }
 window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, district, party }; // for debugging in the console

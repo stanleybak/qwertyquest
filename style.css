@@ -130,3 +130,4 @@ button.city:hover { border-color: var(--accent); }
 .ask { background: var(--paper); border-radius: 18px; padding: 14px 16px; box-shadow: 0 6px 18px #0005; font-size: 1.25rem; font-weight: 800; animation: pop .25s ease-out; }
 .ask button { margin: 10px 8px 0 0; font-size: 1.15rem; font-weight: 800; }
 .ask button.yes { background: var(--good); color: #fff; }
+#update { position: fixed; left: 12px; top: 72px; z-index: 6; }
