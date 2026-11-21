@@ -1077,7 +1077,7 @@ function greet() {
 function finishPrompt(secs) {
   const key = T.key, boss = key === 'boss', p = T.p;
   const job = key.startsWith('j') ? parseInt(key.slice(1)) : 0;
-  const bricks = !job && !boss; // building work, outdoors or indoors
+  const bricks = !job && !boss && !inside; // building work at a site; indoors a prompt helps the neighbor instead
   const ok = T.clean;
   const n = ok && bricks && P.crane > 0 ? 2 : 1;
   if (n === 2) P.crane--;

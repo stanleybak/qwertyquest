@@ -307,7 +307,8 @@ export class Host {
       if (st.boss.hp <= 0) { st.boss = null; st.bossIn = 480; st.jobIn = Math.max(st.jobIn, 90); this.event('bossWin'); this.sprinkle(2); }
       return;
     }
-    this.addLoads(m.site | 0, m.n === 2 ? 2 : 1);
+    if (!Number.isInteger(m.site) || m.site < 0) return; // work inside a building helps the neighbor there; it lays no bricks
+    this.addLoads(m.site, m.n === 2 ? 2 : 1);
   }
 
   /**
