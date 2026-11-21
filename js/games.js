@@ -21,9 +21,10 @@ const step = (mz, c, d) => c + DIRS[d][0] + DIRS[d][1] * mz.w;
 export const mazeSize = id => { const di = parseInt(id) || 0; return { w: Math.min(14, 10 + di), h: Math.min(9, 6 + (di >> 1)) }; };
 
 /**
- * A maze with one route between any two cells. Same on every visit to the same
- * building. Some have a locked door on the way to the goal, and a key hidden
- * in a dead end on the near side of it.
+ * A maze with a few extra openings knocked through, so there is often more
+ * than one way round. Same on every visit to the same building. Some have a
+ * locked door that cannot be walked around, and a key hidden in a dead end on
+ * the near side of it.
  */
 export function makeMaze(id) {
   const { w, h } = mazeSize(id), N = w * h;
@@ -40,6 +41,14 @@ export function makeMaze(id) {
     if (!opts.length) { stack.pop(); continue; }
     const d = opts[(r() * opts.length) | 0], n = step(mz, c, d);
     open[c] |= 1 << d; open[n] |= 1 << ((d + 2) % 4); seen[n] = 1; stack.push(n);
+  }
+  // knock a few more openings through, leaving the dead ends as they are
+  for (let made = 0, tries = 0; made < Math.round(N / 9) && tries < 400; tries++) {
+    const c = (r() * N) | 0, d = r() < 0.5 ? 1 : 2, x = c % w, y = (c / w) | 0;
+    if ((d === 1 ? x === w - 1 : y === h - 1) || open[c] & (1 << d)) continue;
+    const n = step(mz, c, d);
+    if (exits(mz, c).length < 2 || exits(mz, n).length < 2) continue;
+    open[c] |= 1 << d; open[n] |= 1 << ((d + 2) % 4); made++;
   }
   // the goal is the spot that takes the most choices to reach
   let far = -1, best = 0;
@@ -69,8 +78,9 @@ function lockDoor(mz, r) {
   let spots = route.slice(Math.floor(route.length * 0.4), -1);
   const plain = spots.filter(c => exits(mz, c).length === 2);
   if (plain.length) spots = plain;
-  for (let tries = 0; tries < 6 && spots.length; tries++) {
+  for (let tries = 0; tries < 12 && spots.length; tries++) {
     const door = spots.splice((r() * spots.length) | 0, 1)[0], near = treeFrom0(mz, door);
+    if (near[mz.goal] !== -2) continue; // there is a way around this spot: a door here would stop nobody
     // the key goes in a dead end on the start's side of the door, as far off the route as can be
     let key = -1, deep = 0;
     for (let c = 1; c < mz.w * mz.h; c++) {
@@ -87,7 +97,7 @@ export const locked = (mz, c, d, hasKey) => !hasKey && step(mz, c, d) === mz.doo
 /** Cells walked when leaving `c` by exit `d`: on to the next fork, dead end, key, locked door, or the goal. */
 export function runFrom(mz, c, d, hasKey = true) {
   const path = [];
-  for (;;) {
+  while (path.length < mz.w * mz.h) {
     if (locked(mz, c, d, hasKey)) break;
     c = step(mz, c, d); path.push(c);
     if (c === mz.goal || (c === mz.key && !hasKey)) break;
@@ -160,7 +170,14 @@ export function newGame(m, id, placed) {
     g.seen = new Uint8Array(mz.w * mz.h); g.hasKey = placed >= 6;
     if (placed >= 6) g.seen.fill(1); else reveal(g, 0);
   } else if (m.game === 'run') { g.rx = runStop(placed) - (placed ? 0 : 170); g.vx = g.rx; g.raced = false; g.lost = placed >= 6; g.cols = runCols(id); g.lane = g.ly = 1; g.rest = 0; g.col = -1; g.labels = {}; }
-  else if (m.game === 'order') { g.seq = orderSeq(id); g.labels = {}; }
+  else if (m.game === 'order') {
+    g.seq = orderSeq(id); g.labels = {};
+    // where each thing sits: a place on the belt, or a numbered box on the shelf
+    const r = rng(seedOf(id) + 11); g.box = [0, 1, 2, 3, 4, 5];
+    for (let i = 5; i > 0; i--) { const j = (r() * (i + 1)) | 0; [g.box[i], g.box[j]] = [g.box[j], g.box[i]]; }
+    g.spot = []; g.box.forEach((it, p) => { g.spot[it] = p; });
+    g.belt = 0; g.open = {}; g.vis = ''; g.keep = null;
+  }
   else g.labels = {};
   return g;
 }
@@ -235,7 +252,9 @@ function drawMaze(ctx, v, F) {
   if (g.hasKey && !found) emoji(ctx, '🗝️', X + cw * 0.28, Y - ch * 0.25, big * 0.45);
 }
 
-export const LANE_ICONS = ['1️⃣', '2️⃣', '3️⃣'];
+export const LANE_ICONS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
+/** How far along the belt a thing is, 0 to 1, or -1 while it is out of sight round the back. */
+export const beltX = (g, item) => { const u = (((g.belt + g.spot[item]) % 6) + 6) % 6; return u < 3 ? u / 3 : -1; };
 function drawRun(ctx, v, F) {
   const { m, g, t } = v, ground = F.y0 + F.H * 0.46, fh = F.y0 + F.H - ground;
   const laneY = l => ground + fh * (0.3 + 0.27 * l);
@@ -296,13 +315,31 @@ function drawOrder(ctx, v, F) {
     ctx.globalAlpha = 1;
     if (got) emoji(ctx, '✅', x + 10, y + 10, 14);
   });
-  // the shelf
-  const shelfY = F.y0 + F.H * 0.5;
-  ctx.fillStyle = '#0003'; ctx.fillRect(F.x0 + F.W * 0.3, shelfY, F.W * 0.64, 8);
-  for (let i = 0; i < 6; i++) {
-    if (v.mask >> i & 1) continue;
-    const hot = v.opts.includes(i);
-    emoji(ctx, m.items[i], R.fx(0.36 + i * 0.105), shelfY - 26 - (hot ? Math.abs(Math.sin(t * 4 + i)) * 6 : 0), 46);
+  // the shelf, or the belt
+  const shelfY = F.y0 + F.H * 0.5, x0 = F.x0 + F.W * 0.3, sw = F.W * 0.64;
+  if (m.fun === 'belt') { // things ride past, left to right
+    ctx.fillStyle = '#4a4458'; ctx.beginPath(); ctx.roundRect(x0, shelfY - 2, sw, 14, 7); ctx.fill();
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, shelfY - 70, sw, 90); ctx.clip();
+    ctx.fillStyle = '#ffffff33';
+    for (let k = -1; k < 14; k++) ctx.fillRect(x0 + ((k + (g.belt * 4) % 1) / 12) * sw, shelfY, 6, 10);
+    for (let i = 0; i < 6; i++) {
+      const u = beltX(g, i);
+      if (v.mask >> i & 1 || u < 0) continue;
+      emoji(ctx, m.items[i], x0 + u * sw, shelfY - 26 - (v.opts.includes(i) && i === v.want ? Math.abs(Math.sin(t * 6)) * 6 : 0), 46);
+    }
+    ctx.restore();
+  } else {
+    ctx.fillStyle = '#0003'; ctx.fillRect(x0, shelfY, sw, 8);
+    for (let p = 0; p < 6; p++) {
+      const i = m.fun === 'boxes' ? g.box[p] : p;
+      if (v.mask >> i & 1) continue;
+      const hot = v.opts.includes(i), x = R.fx(0.36 + p * 0.105), y = shelfY - 26 - (hot ? Math.abs(Math.sin(t * 4 + p)) * 4 : 0);
+      if (m.fun !== 'boxes') { emoji(ctx, m.items[i], x, y, 46); continue; }
+      // a closed box, until it is opened for a look
+      if (g.open[i] > 0) { emoji(ctx, '📭', x, shelfY - 20, 30); emoji(ctx, m.items[i], x, shelfY - 52, 40); }
+      else emoji(ctx, '📦', x, y, 44);
+      emoji(ctx, LANE_ICONS[p], x, shelfY + 22, 20);
+    }
   }
   const nx = R.fx(0.1), ny = R.floorY + 6;
   emoji(ctx, m.face, nx, ny - 8 + Math.sin(t * 3) * 2, 78);

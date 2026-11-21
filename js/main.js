@@ -301,7 +301,7 @@ function nextKey() {
 function dealChoices() {
   const g = inside.g, m = inside.m;
   const spot = pickSpot();
-  let opts, shut = false;
+  let opts, shut = false, pool = null;
   if (m.game === 'maze') { // every way out, except through a door that is still locked
     const all = G.exits(g.mz, g.cell), ways = all.filter(d => !G.locked(g.mz, g.cell, d, g.hasKey));
     g.labels = {}; shut = ways.length < all.length; opts = ways.map(d => ({ id: d, icon: G.ARROWS[d] }));
@@ -311,12 +311,18 @@ function dealChoices() {
   } else if (spot >= 0) { // the thing that belongs here, among a few that do not
     const rest = [0, 1, 2, 3, 4, 5].filter(k => k !== spot && !(inside.mask >> k & 1)).map(k => inside.perm[k]).sort(() => Math.random() - 0.5).slice(0, 3);
     g.labels = {}; opts = [inside.perm[spot], ...rest].sort((a, b) => a - b).map(i => ({ id: i, icon: m.items[i] }));
-  } else { // this player's own item, plus a few others still on the shelf to tell it apart from
-    const rest = g.seq.filter(i => !(inside.mask >> i & 1) && i !== inside.want).slice(0, 3);
-    opts = [inside.want, ...rest].sort((a, b) => a - b).map(i => ({ id: i, icon: m.items[i] }));
+  } else {
+    // Everything still to fetch gets its word now, so no two words ever clash later on.
+    pool = [0, 1, 2, 3, 4, 5].filter(i => !(inside.mask >> i & 1)).map(i => ({ id: i, icon: m.items[i] }));
+    if (m.fun === 'belt') opts = pool.filter(o => G.beltX(g, o.id) >= 0); // what is riding past right now
+    else if (m.fun === 'boxes') { opts = pool.sort((a, b) => g.spot[a.id] - g.spot[b.id]); for (const o of opts) o.icon = G.LANE_ICONS[g.spot[o.id]]; } // every box, by its number
+    else { // this player's own item, plus a few others still on the shelf to tell it apart from
+      const rest = g.seq.filter(i => !(inside.mask >> i & 1) && i !== inside.want).slice(0, 3);
+      opts = pool.filter(o => o.id === inside.want || rest.includes(o.id));
+    }
   }
-  const used = opts.map(o => g.labels[o.id]).filter(Boolean);
-  for (const o of opts) {
+  const used = (pool || opts).map(o => g.labels[o.id]).filter(Boolean);
+  for (const o of pool || opts) {
     let t = g.labels[o.id];
     // labels must differ, and none may be the start of another
     for (let k = 0; !t && k < 300; k++) {
@@ -327,14 +333,21 @@ function dealChoices() {
     o.text = g.labels[o.id] = t || 'fj'.repeat(used.length + 1);
     used.push(o.text);
   }
+  const item = m.items[inside.want];
+  if (m.fun === 'belt' && !opts.length) { $('hint').textContent = `${item} is coming round. Get ready!  (Tab to stop)`; $('prompt').innerHTML = ''; return; } // nothing on the belt just now
   CH.opts = opts; CH.buf = ''; CH.clean = true;
+  // the belt moved while a word was half typed: carry on with it if it is still there
+  if (g.keep && opts.some(o => o.text.startsWith(g.keep[0]))) [CH.buf, CH.clean] = g.keep;
+  g.keep = null;
   T.errs = new Set(); T.miss = 0; T.shown = performance.now();
   $('panel').classList.remove('again');
   $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + 'Which way? Type the word by an arrow.'
     : m.game === 'run' ? 'Which lane is clear? Type its word.' + (opts.some(o => o.long) ? ` A ⚡ lane takes longer to type, but it trips up ${m.rival ? m.rival[1] : 'the other runner'}.` : '')
+    : m.fun === 'belt' ? (opts.some(o => o.id === inside.want) ? `Grab ${item} for ${m.who}: type its word before it rolls away!` : `${item} is coming round. Get ready!`)
+    : m.fun === 'boxes' ? `${m.who} wants ${item} from you. Which box is it in? Type a box's word to look inside.`
     : m.pick === 'color' ? 'Which book matches the color of this shelf tag? Type its word.'
     : spot >= 0 ? 'What goes in this spot? Type its word.'
-    : `${m.who} wants ${m.items[inside.want]} from you. Type its word.`) + '  (Esc to stop)';
+    : `${m.who} wants ${m.items[inside.want]} from you. Type its word.`) + '  (Tab to stop)';
   paintChoices();
 }
 function paintChoices() {
@@ -377,7 +390,7 @@ function chose(o) {
   CH.buf = ''; CH.clean = true; T.errs = new Set();
   if (!clean) { // same labels stay put until one is typed with no slips
     $('panel').classList.add('again');
-    $('hint').textContent = '↩ That one had a slip. Type it again with no slips.  (Esc to stop)';
+    $('hint').textContent = '↩ That one had a slip. Type it again with no slips.  (Tab to stop)';
     beep(300, 0.12, 'triangle', 0.06);
     net.toHost('done', { site: -1, clean: false, boss: false, n: 1, job: 0 });
     tally({ text: o.text }, false, errs, 0);
@@ -388,21 +401,28 @@ function chose(o) {
   const secs = (performance.now() - CH.t0) / 1000;
   if (secs > 0.3 && o.text.length > 2) { const c = (o.text.length - 1) / secs; P.cps = P.cps ? P.cps * 0.8 + c * 0.2 : c; } // typing speed, for pacing a race
   if (m.game === 'run' && g.cols[g.col][o.id] === 1) { // ran into something
-    $('hint').textContent = 'Bonk! Something is in that lane. Look for a clear one.  (Esc to stop)';
+    $('hint').textContent = 'Bonk! Something is in that lane. Look for a clear one.  (Tab to stop)';
     me.stumble = 0.6; beep(160, 0.2, 'sawtooth', 0.07);
     if (m.rival && !g.lost) g.vx += 110; // and the other runner gets ahead
     paintChoices();
     return;
   }
+  if (m.fun === 'boxes' && o.id !== inside.want) { // a look inside: remember what was there
+    g.open[o.id] = 3;
+    $('hint').textContent = `Box ${g.spot[o.id] + 1} has ${m.items[o.id]}. Remember that! ${m.who} wants ${m.items[inside.want]} from you.  (Tab to stop)`;
+    beep(520, 0.1, 'triangle', 0.06);
+    paintChoices();
+    return;
+  }
   if (m.game === 'order' && o.id !== inside.want) {
-    $('hint').textContent = `Not that one! ${m.who} wants ${m.items[inside.want]} from you.  (Esc to stop)`;
+    $('hint').textContent = `Not that one! ${m.who} wants ${m.items[inside.want]} from you.  (Tab to stop)`;
     beep(220, 0.14, 'triangle', 0.06);
     paintChoices();
     return;
   }
   const spot = pickSpot();
   if (spot >= 0 && o.id !== inside.perm[spot]) {
-    $('hint').textContent = (m.pick === 'color' ? 'That book is a different color. Look at the tag!' : 'That does not go here. Take another look!') + '  (Esc to stop)';
+    $('hint').textContent = (m.pick === 'color' ? 'That book is a different color. Look at the tag!' : 'That does not go here. Take another look!') + '  (Tab to stop)';
     if (m.pick === 'memory') inside.peek = 2.5; // a quick look at the plan
     beep(220, 0.14, 'triangle', 0.06);
     paintChoices();
@@ -1204,18 +1224,18 @@ function updatePrompt() {
         : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
             : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
               : p.perfect ? 'Perfect run: one slip sends you back to the start.'
-                : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : 'Type it to deliver bricks.') + '  (Esc to stop)';
+                : p.burst ? `Speed burst: can you finish in ${p.burst} seconds?` : 'Type it to deliver bricks.') + '  (Tab to stop)';
     }
     return c.zone;
   }
   let hint;
   if (inside && c.job) {
     const what = c.job.t ? 'leak' : 'fire';
-    hint = c.base ? `Press Enter to ${c.job.t ? 'fix this leak' : 'spray this fire'}.` : `Walk to a ${what} with the arrow keys.  (Esc to go outside)`;
+    hint = c.base ? `Press Enter to ${c.job.t ? 'fix this leak' : 'spray this fire'}.` : `Walk to a ${what} with the arrow keys.  (Q to go outside)`;
   } else if (inside && inside.m.game !== 'furnish') {
     const m = inside.m;
     hint = !c.base ? 'All done here! Press Enter to go back outside.'
-      : (m.game === 'maze' ? `Press Enter to start looking for ${m.goal}.` : m.game === 'run' ? `Press Enter to start running to ${m.goal}.` : `Press Enter to start fetching things for ${m.who}.`) + '  (Esc to go outside)';
+      : (m.game === 'maze' ? `Press Enter to start looking for ${m.goal}.` : m.game === 'run' ? `Press Enter to start running to ${m.goal}.` : `Press Enter to start fetching things for ${m.who}.`) + '  (Q to go outside)';
   } else if (inside) {
     const sp = inside.near, all = inside.placed >= inside.m.items.length;
     const pk = inside.m.pick;
@@ -1440,6 +1460,17 @@ function frame(now) {
       if (inside.m.game === 'order' && CH.opts) { CH.opts = null; $('prompt').innerHTML = ''; } // deal again around the new item
     }
     if (inside.placed >= 6 && !inside.fin) finishRoom();
+    if (inside.m.game === 'order' && !inside.job) {
+      for (const k in g.open) g.open[k] = Math.max(0, g.open[k] - dt); // boxes close again after a look
+      if (inside.m.fun === 'belt' && engaged) {
+        // The belt gives time to type a word at this player's own speed while their thing is in sight, and hurries otherwise.
+        const left = [0, 1, 2, 3, 4, 5].filter(i => !(inside.mask >> i & 1)), vis = left.filter(i => G.beltX(g, i) >= 0);
+        const len = (g.labels[inside.want] || 'abcdefgh').length, cross = len / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.6) + 3.5;
+        g.belt += (vis.includes(inside.want) ? 3 / cross : 2.2) * dt;
+        const key = left.filter(i => G.beltX(g, i) >= 0).join();
+        if (key !== g.vis) { g.vis = key; if (CH.opts) { g.keep = [CH.buf, CH.clean]; CH.opts = null; } } // deal again: something rolled in or out
+      }
+    }
     const ix = walk ? (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0) : 0, iy = walk ? (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0) : 0;
     inside.x = Math.min(0.97, Math.max(0.04, inside.x + ix * 0.4 * dt));
     inside.y = Math.min(1, Math.max(0, inside.y + iy * 1.3 * dt));
@@ -1550,14 +1581,16 @@ addEventListener('keydown', e => {
   if (mode === 'start' || mode === 'lobby') return;
   const ch = charOf(e);
   if (DR.on) { // tricky-key practice has the keyboard
-    if (e.key === 'Escape') { endDrill(false); e.preventDefault(); } else if (ch) { e.preventDefault(); typeChar(ch); }
+    if (e.key === 'Escape' || e.key === 'Tab') { endDrill(false); e.preventDefault(); } else if (ch) { e.preventDefault(); typeChar(ch); }
     return;
   }
   if (document.querySelector('.screen:not(.hidden)')) return;
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }
-  if (e.key === 'Escape') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }
+  // Tab stops typing; Tab or Q goes back outside. Esc does the same, but in most browsers it also leaves full screen.
+  if (e.key === 'Escape' || e.key === 'Tab') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }
+  if (inside && !engaged && ch && ch.toLowerCase() === 'q') { leaveBuilding(); e.preventDefault(); return; }
   if (e.key === 'Enter') { pressEnter(); e.preventDefault(); return; }
-  if (e.key === 'Tab' || e.key === 'Backspace') { e.preventDefault(); return; }
+  if (e.key === 'Backspace') { e.preventDefault(); return; }
   if (ch) { e.preventDefault(); CH.opts ? typeChoice(ch) : typeChar(ch); }
 });
 addEventListener('keyup', e => held.delete(e.key));

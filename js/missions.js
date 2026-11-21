@@ -5,7 +5,8 @@
 // maze (pick a way at each fork), run (get past six things in a hallway).
 // more: { pick } for a furnish room where the right thing must be chosen for each spot
 //   ('memory': the plan is shown, then hidden; 'color': each spot has a color tag to match),
-//   { rival: [emoji, name] } for a run that is a race.
+//   { rival: [emoji, name] } for a run that is a race,
+//   { fun } for a fetch game: 'belt' (things ride past on a belt), 'boxes' (things are hidden in closed boxes).
 const M = (id, who, face, title, ask, thanks, items, wall, floor, game = 'furnish', goal = '', more = {}) => ({ id, who, face, title, ask, thanks, items, wall, floor, game, goal, ...more });
 /** Shelf tag colors for a 'color' room, one per item. */
 export const TAGS = ['#e5484d', '#2fae66', '#2f7de1', '#ff8a3d', '#f2c200', '#6b6b76'];
@@ -20,7 +21,7 @@ export const MISSIONS = [
   ],
   [
     M('baker', 'Baker Bo', '🧑‍🍳', 'The bakery', 'Welcome to my bakery! I have a big order to pack. Bring me the treats in the order on my list!',
-      'Mmm. The order is all packed. Thank you, my friend!', ['🍞', '🥐', '🧁', '🍪', '🥧', '🎂'], '#ffe9b8', '#d9a35f', 'order'),
+      'Mmm. The order is all packed. Thank you, my friend!', ['🍞', '🥐', '🧁', '🍪', '🥧', '🎂'], '#ffe9b8', '#d9a35f', 'order', '', { fun: 'belt' }),
     M('petshop', 'Ms. Paws', '🧑‍🦰', 'The pet shop', 'Oh no! Nibbles the hamster ran off into the back room. Can you find your way to him?',
       'You found Nibbles! You\'re the best!', ['🐠', '🐹', '🐇', '🦜', '🐢', '🐈'], '#d9f5d0', '#9ac88a', 'maze', '🐹'),
   ],
@@ -28,7 +29,7 @@ export const MISSIONS = [
     M('librarian', 'Mr. Quill', '🧑‍🏫', 'The library', 'Shh. Welcome to the library. Could you help me put the books on the shelves?',
       'Wonderful. So many stories to read. Thank you.', ['📕', '📗', '📘', '📙', '📒', '📓'], '#e6dcf5', '#a58fc7', 'furnish', '', { pick: 'color' }),
     M('scientist', 'Dr. Fizz', '🧑‍🔬', 'The science lab', 'My big experiment is ready! Hand me the lab things in the order on my list!',
-      'Eureka! It all works! Thank you, thank you!', ['🔬', '🧪', '🧲', '🔭', '⚗️', '💡'], '#d6f0f2', '#86b8bd', 'order'),
+      'Eureka! It all works! Thank you, thank you!', ['🔬', '🧪', '🧲', '🔭', '⚗️', '💡'], '#d6f0f2', '#86b8bd', 'order', '', { fun: 'boxes' }),
   ],
   [
     M('guide', 'Lady Marble', '🧑‍🎨', 'The museum', 'Welcome to the museum. Our crown is lost in the back halls. Can you find your way to it?',
