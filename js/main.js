@@ -290,7 +290,7 @@ function typeChar(ch) {
 // ---------- choices: several labels on offer, type one to pick it ----------
 /** The spot being filled in a room where the right thing has to be chosen for it, or -1. */
 const pickSpot = () => (inside && !inside.job && inside.m.pick && engaged && engaged.startsWith('i') ? +engaged.split(':').pop() : -1);
-const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || inside.m.game === 'order' || pickSpot() >= 0);
+const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || inside.m.game === 'order' || inside.m.game === 'run' || pickSpot() >= 0);
 /** The key the guide should point at: only known when one choice is left in play. */
 function nextKey() {
   if (T.p) return T.p.text[T.pos];
@@ -305,6 +305,9 @@ function dealChoices() {
   if (m.game === 'maze') { // every way out, except through a door that is still locked
     const all = G.exits(g.mz, g.cell), ways = all.filter(d => !G.locked(g.mz, g.cell, d, g.hasKey));
     g.labels = {}; shut = ways.length < all.length; opts = ways.map(d => ({ id: d, icon: G.ARROWS[d] }));
+  } else if (m.game === 'run') { // all three lanes at the next stop: the scene shows which are clear
+    g.labels = {}; g.col = inside.placed;
+    opts = g.cols[g.col].map((c, l) => ({ id: l, icon: G.LANE_ICONS[l] + (c === 2 ? '⚡' : ''), long: c === 2 }));
   } else if (spot >= 0) { // the thing that belongs here, among a few that do not
     const rest = [0, 1, 2, 3, 4, 5].filter(k => k !== spot && !(inside.mask >> k & 1)).map(k => inside.perm[k]).sort(() => Math.random() - 0.5).slice(0, 3);
     g.labels = {}; opts = [inside.perm[spot], ...rest].sort((a, b) => a - b).map(i => ({ id: i, icon: m.items[i] }));
@@ -317,7 +320,8 @@ function dealChoices() {
     let t = g.labels[o.id];
     // labels must differ, and none may be the start of another
     for (let k = 0; !t && k < 300; k++) {
-      const c = S.choicePrompt(P);
+      let c = S.choicePrompt(P);
+      if (o.long) { const more = S.choicePrompt(P); c += (P.step >= 5 ? ' ' : '') + more; } // a ⚡ takes more typing
       if (!used.some(u => u.startsWith(c) || c.startsWith(u)) || (k > 250 && !used.includes(c))) t = c;
     }
     o.text = g.labels[o.id] = t || 'fj'.repeat(used.length + 1);
@@ -327,6 +331,7 @@ function dealChoices() {
   T.errs = new Set(); T.miss = 0; T.shown = performance.now();
   $('panel').classList.remove('again');
   $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + 'Which way? Type the word by an arrow.'
+    : m.game === 'run' ? 'Which lane is clear? Type its word.' + (opts.some(o => o.long) ? ` A ⚡ lane takes longer to type, but it trips up ${m.rival ? m.rival[1] : 'the other runner'}.` : '')
     : m.pick === 'color' ? 'Which book matches the color of this shelf tag? Type its word.'
     : spot >= 0 ? 'What goes in this spot? Type its word.'
     : `${m.who} wants ${m.items[inside.want]} from you. Type its word.`) + '  (Esc to stop)';
@@ -352,6 +357,7 @@ function typeChoice(ch) {
   const now = performance.now(), next = CH.buf + ch;
   const live = CH.opts.filter(o => o.text.startsWith(CH.buf));
   if (live.some(o => o.text.startsWith(next))) {
+    if (!CH.buf) CH.t0 = now;
     S.recordKey(P, ch, true, CH.buf ? now - T.last : 0); S.lessonKey(P, true, CH.buf ? now - T.last : 0);
     T.last = now; CH.buf = next; sfx.key(); firstHit(ch);
     const hit = CH.opts.find(o => o.text === next);
@@ -379,6 +385,15 @@ function chose(o) {
     return;
   }
   $('panel').classList.remove('again'); T.miss = 0;
+  const secs = (performance.now() - CH.t0) / 1000;
+  if (secs > 0.3 && o.text.length > 2) { const c = (o.text.length - 1) / secs; P.cps = P.cps ? P.cps * 0.8 + c * 0.2 : c; } // typing speed, for pacing a race
+  if (m.game === 'run' && g.cols[g.col][o.id] === 1) { // ran into something
+    $('hint').textContent = 'Bonk! Something is in that lane. Look for a clear one.  (Esc to stop)';
+    me.stumble = 0.6; beep(160, 0.2, 'sawtooth', 0.07);
+    if (m.rival && !g.lost) g.vx += 110; // and the other runner gets ahead
+    paintChoices();
+    return;
+  }
   if (m.game === 'order' && o.id !== inside.want) {
     $('hint').textContent = `Not that one! ${m.who} wants ${m.items[inside.want]} from you.  (Esc to stop)`;
     beep(220, 0.14, 'triangle', 0.06);
@@ -394,9 +409,15 @@ function chose(o) {
     return;
   }
   sfx.load();
-  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'maze' ? undefined : roomKey(inside.id), slot: spot >= 0 ? spot : o.id });
+  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'maze' ? undefined : roomKey(inside.id), slot: spot >= 0 ? spot : m.game === 'run' ? undefined : o.id });
   CH.opts = null; $('prompt').innerHTML = '';
   if (m.game === 'maze') { g.path = G.runFrom(g.mz, g.cell, o.id, g.hasKey); g.cell = g.path[g.path.length - 1]; }
+  else if (m.game === 'run') {
+    g.lane = o.id;
+    if (g.cols[g.col][o.id] === 2 && m.rival && !g.lost) { g.rest = 3; g.vx = Math.max(G.runStop(0) - 170, g.vx - 150); toast(`⚡ Zap! ${m.rival[1]} tripped.`); }
+    for (let b = 0; b < 6; b++) if (!(inside.mask >> b & 1)) { inside.mask |= 1 << b; break; }
+    inside.pop = 0;
+  }
   else if (spot >= 0) { inside.mask |= 1 << spot; inside.last = spot; inside.want = -1; inside.pop = 0; inside.talk = 0; }
   else {
     delete g.labels[o.id];
@@ -921,7 +942,7 @@ document.addEventListener('visibilitychange', () => {
 function whereInside() {
   const g = inside.g, game = inside.job ? 'room' : inside.m.game;
   if (game === 'maze') return [inside.id, Math.round(g.px * 100), Math.round(g.py * 100)];
-  if (game === 'run') return [inside.id, Math.round(g.rx), 0];
+  if (game === 'run') return [inside.id, Math.round(g.rx), Math.round(g.ly * 100)];
   return [inside.id, Math.round(inside.x * 1000), Math.round(inside.y * 1000)];
 }
 function sendPos() {
@@ -1178,7 +1199,7 @@ function updatePrompt() {
       $('hint').textContent = (p.redo ? '↩ Try this one again with no slips.'
         : lastSlip ? 'Oops, a slip. That one will come back.'
           : c.job ? JOBS[c.job.t].hint
-          : inside ? (inside.m.game === 'run' ? (inside.m.rival && !inside.g.lost ? `Type it to get past! Beat ${inside.m.rival[1]} to ${inside.m.goal} and win a 🛡️ shield.` : 'Type it to get past!') : `Type to bring in the next thing for ${inside.m.who}.`)
+          : inside ? ( `Type to bring in the next thing for ${inside.m.who}.`)
         : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
             : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
               : p.perfect ? 'Perfect run: one slip sends you back to the start.'
@@ -1438,11 +1459,15 @@ function frame(now) {
       g.rx += Math.abs(gap) <= s ? gap : Math.sign(gap) * s;
       inside.walk = Math.abs(gap) > 1; me.face = 1;
       // The one to beat runs only while there is something to type, at a pace set by this player's own speed.
+      g.ly += (g.lane - g.ly) * Math.min(1, dt * 14); // hop across to the chosen lane
+      if (CH.opts && g.col !== inside.placed) { CH.opts = null; $('prompt').innerHTML = ''; } // a teammate cleared this stop: deal the next one
       const rival = inside.m.rival;
-      g.racing = !!rival && !g.lost && inside.placed < 6 && !!engaged && !!T.p;
-      if (g.racing) {
+      g.racing = !!rival && !g.lost && inside.placed < 6 && !!engaged && !!CH.opts;
+      g.rest = Math.max(0, g.rest - dt);
+      if (g.racing && !g.rest) {
         g.raced = true;
-        g.vx += 280 / (T.p.text.length / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.8) + 1.6) * dt;
+        const len = Math.min(...CH.opts.filter(o => !o.long).map(o => o.text.length));
+        g.vx += 280 / (len / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.8) + 2.2) * dt;
         if (g.vx >= G.runStop(6)) { g.vx = G.runStop(6) + 50; g.lost = true; toast(`${rival[0]} ${rival[1]} got there first! Keep going and finish the race.`); }
       }
     }

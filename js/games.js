@@ -126,6 +126,23 @@ export function reveal(g, c) {
 // ---------- hallway run ----------
 export const runX = i => 320 + i * 280; // where obstacle i stands; the goal is at runX(6)
 export const runStop = placed => runX(Math.min(6, placed)) - 78;
+/**
+ * What stands in each of the three lanes at each of the six stops:
+ * 0 a clear lane, 1 something in the way, 2 a clear lane with a ⚡ on it.
+ * Half the stops have one clear lane; the others add a ⚡ lane. Same for everyone in the building.
+ */
+export function runCols(id) {
+  const r = rng(seedOf(id) + 3), cols = [];
+  let last = 1;
+  for (let i = 0; i < 6; i++) {
+    let free = (r() * 3) | 0;
+    if (free === last) free = (free + 1 + ((r() * 2) | 0)) % 3; // never the lane the runner is already in: a move at every stop
+    const col = [1, 1, 1]; col[free] = 0;
+    if (i % 2 === (seedOf(id) & 1)) col[(free + 1 + ((r() * 2) | 0)) % 3] = 2;
+    cols.push(col); last = free;
+  }
+  return cols;
+}
 
 /** The order of the list in a fetch game. Same for everyone in the same building. */
 export function orderSeq(id) {
@@ -142,7 +159,7 @@ export function newGame(m, id, placed) {
     g.px = g.cell % mz.w; g.py = (g.cell / mz.w) | 0;
     g.seen = new Uint8Array(mz.w * mz.h); g.hasKey = placed >= 6;
     if (placed >= 6) g.seen.fill(1); else reveal(g, 0);
-  } else if (m.game === 'run') { g.rx = runStop(placed) - (placed ? 0 : 170); g.vx = g.rx; g.raced = false; g.lost = placed >= 6; }
+  } else if (m.game === 'run') { g.rx = runStop(placed) - (placed ? 0 : 170); g.vx = g.rx; g.raced = false; g.lost = placed >= 6; g.cols = runCols(id); g.lane = g.ly = 1; g.rest = 0; g.col = -1; g.labels = {}; }
   else if (m.game === 'order') { g.seq = orderSeq(id); g.labels = {}; }
   else g.labels = {};
   return g;
@@ -218,35 +235,45 @@ function drawMaze(ctx, v, F) {
   if (g.hasKey && !found) emoji(ctx, '🗝️', X + cw * 0.28, Y - ch * 0.25, big * 0.45);
 }
 
+export const LANE_ICONS = ['1️⃣', '2️⃣', '3️⃣'];
 function drawRun(ctx, v, F) {
-  const { m, g, t } = v, ground = F.y0 + F.H * 0.74;
+  const { m, g, t } = v, ground = F.y0 + F.H * 0.46, fh = F.y0 + F.H - ground;
+  const laneY = l => ground + fh * (0.3 + 0.27 * l);
   ctx.save();
   ctx.beginPath(); ctx.roundRect(F.x0, F.y0, F.W, F.H, 18); ctx.clip();
   ctx.fillStyle = m.wall; ctx.fillRect(F.x0, F.y0, F.W, F.H);
   ctx.fillStyle = m.floor; ctx.fillRect(F.x0, ground, F.W, F.H);
   const cam = g.rx - F.W * 0.3, sx = X => F.x0 + X - cam;
   for (let k = Math.floor(cam / 240); k < cam / 240 + 5; k++) { // windows drifting by
-    ctx.fillStyle = '#ffffff66'; ctx.fillRect(sx(k * 240 + 60), F.y0 + 50, 70, 60);
-    ctx.fillStyle = '#0001'; ctx.fillRect(sx(k * 240), ground, 4, F.H);
+    ctx.fillStyle = '#ffffff66'; ctx.fillRect(sx(k * 240 + 60), F.y0 + 44, 70, 50);
   }
-  let lift = 0;
-  for (let i = 0; i < 6; i++) {
-    const d = (g.rx - runX(i)) / 80;
-    if (i < v.placed && Math.abs(d) < 1) lift = Math.max(lift, (1 - d * d) * 78);
-    ctx.globalAlpha = i < v.placed ? 0.4 : 1;
-    emoji(ctx, m.items[i], sx(runX(i)), ground - 24, 52);
-    ctx.globalAlpha = 1;
-  }
-  emoji(ctx, m.goal, sx(runX(6)), ground - 34 + Math.sin(t * 4) * 4, 68);
-  // the one to beat: it hops along its own lane, a little behind the track
+  ctx.strokeStyle = '#ffffff55'; ctx.lineWidth = 2; ctx.setLineDash([14, 12]); ctx.lineDashOffset = cam; // lane lines
+  for (const l of [0.5, 1.5]) { ctx.beginPath(); ctx.moveTo(F.x0, laneY(l) + 8); ctx.lineTo(F.x0 + F.W, laneY(l) + 8); ctx.stroke(); }
+  ctx.setLineDash([]);
+  // the one to beat runs along the wall, out of the lanes
   if (m.rival) {
-    const rx = Math.max(F.x0 + 28, sx(g.vx)), ry = ground - 30 - Math.abs(Math.sin(t * 7)) * (g.racing ? 12 : 2);
-    ctx.fillStyle = '#0002'; ctx.beginPath(); ctx.ellipse(rx, ground - 4, 20, 5, 0, 0, 7); ctx.fill();
-    emoji(ctx, m.rival[0], rx, ry, 44);
-    ctx.font = '800 13px system-ui'; ctx.fillStyle = '#0008'; ctx.textAlign = 'center'; ctx.fillText(m.rival[1], rx, ry - 34);
+    const rx = Math.max(F.x0 + 28, sx(g.vx)), ry = ground - 22 - (g.rest > 0 ? 0 : Math.abs(Math.sin(t * 7)) * (g.racing ? 12 : 2));
+    ctx.fillStyle = '#0002'; ctx.beginPath(); ctx.ellipse(rx, ground + 2, 18, 5, 0, 0, 7); ctx.fill();
+    emoji(ctx, m.rival[0], rx, ry, 40);
+    if (g.rest > 0) emoji(ctx, '💫', rx + 16, ry - 22, 18);
+    ctx.font = '800 13px system-ui'; ctx.fillStyle = '#0008'; ctx.textAlign = 'center'; ctx.fillText(m.rival[1], rx, ry - 32);
   }
-  for (const o of v.mates) v.drawMate(o, sx(o.ix), ground + 10);
-  v.drawMe(sx(g.rx), ground + 10 - lift);
+  const size = Math.min(46, fh * 0.34);
+  emoji(ctx, m.goal, sx(runX(6)), laneY(1) - 30 + Math.sin(t * 4) * 4, 68);
+  // lane by lane, back to front, so nearer things cover farther ones
+  for (let l = 0; l < 3; l++) {
+    const y = laneY(l);
+    for (let i = 0; i < 6; i++) {
+      const x = sx(runX(i)), c = g.cols[i][l], next = i === v.placed;
+      ctx.globalAlpha = i < v.placed ? 0.35 : 1;
+      if (c === 1) emoji(ctx, m.items[(i + l * 2) % 6], x, y - size * 0.4, size);
+      else if (c === 2 && i >= v.placed) emoji(ctx, '⚡', x, y - size * 0.4 + Math.sin(t * 6 + i) * 3, size * 0.8);
+      ctx.globalAlpha = 1;
+      if (next && v.opts.length) emoji(ctx, LANE_ICONS[l], x - 62, y - 6, 22 + Math.sin(t * 6) * 1.5); // the lane's number, as on the choices
+    }
+    for (const o of v.mates) if (Math.round(o.iy / 100) === l) v.drawMate(o, sx(o.ix), y + 8);
+    if (Math.round(g.ly) === l) v.drawMe(sx(g.rx), laneY(g.ly) + 8);
+  }
   ctx.restore();
   title(ctx, F, `${m.title.toUpperCase()}: get to ${m.goal}` + (m.rival && !g.lost && v.placed < 6 ? ` before ${m.rival[1]}!` : ''));
 }
