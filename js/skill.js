@@ -393,8 +393,8 @@ export function troubleKeys(p, n = 3) {
     .sort((a, b) => errRate(b[1]) - errRate(a[1])).slice(0, n).map(x => x[0]);
 }
 /**
- * A short drill for the keys in `hard`: each one woven between three keys the
- * player finds easy, then the hard ones mixed together, and last a few real
+ * A short drill for the keys in `hard`: each one mixed in among three keys the
+ * player finds easy (four letters to a line, in a changing pattern), then the hard ones mixed together, and last a few real
  * words that lean on those keys, the longer the better.
  */
 export function drillSet(p, hard) {
@@ -404,12 +404,16 @@ export function drillSet(p, hard) {
   if (!easy.length) easy = [hard[0]];
   const out = [];
   const some = () => [...easy].sort(() => Math.random() - 0.5); // the easy keys, shuffled: three or four different letters in every line
-  for (const h of hard) {
-    const [a, b = a, c = a] = some();
-    out.push([h, a, h, b, h, c]);
-    if (hard.length <= 2) { const [d, e = d] = some(); out.push([d, h, h, e, h, d]); }
-  }
-  out.push(Array.from({ length: 6 }, (_, k) => (k === 3 ? pick(easy) : hard[(k > 3 ? k - 1 : k) % hard.length])));
+  // Where the tricky key falls in a line of six. It is never a plain back-and-forth of two letters:
+  // three easy keys fill the gaps, and the tricky one sometimes comes twice in a row.
+  const shapes = ['hahbch', 'ahbhch', 'habhhc', 'ahhbch', 'habchh', 'abhchh'].sort(() => Math.random() - 0.5);
+  const line = (h, shape) => { const [a, b = a, c = b] = some(); return [...shape].map(x => ({ h, a, b, c })[x]); };
+  hard.forEach((h, i) => {
+    out.push(line(h, shapes[i % shapes.length]));
+    if (hard.length <= 2) out.push(line(h, shapes[(i + 3) % shapes.length]));
+  });
+  if (hard.length > 1) out.push(Array.from({ length: 6 }, (_, k) => (k === 3 ? pick(easy) : hard[(k > 3 ? k - 1 : k) % hard.length]))); // all the tricky ones together
+  else out.push(line(hard[0], shapes[2]));
   const drills = out.map(a => ({ text: a.join(''), spaced: true }));
   // words: the ones with the most tricky letters in them, each tricky key getting its turn
   const uses = w => [...w].filter(c => hard.includes(c)).length;
