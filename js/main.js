@@ -509,8 +509,7 @@ function goFull() {
   try {
     const el = document.documentElement;
     if (document.fullscreenElement || !el.requestFullscreen) return;
-    // Esc is the game's own "stop" key: where the browser allows it, keep Esc from closing full screen
-    el.requestFullscreen().then(() => navigator.keyboard?.lock?.(['Escape'])).catch(() => {});
+    el.requestFullscreen().catch(() => {}); // Esc is left alone: it is the browser's key for leaving full screen
   } catch { /* stay in the window */ }
 }
 function initStart() {
@@ -1589,13 +1588,13 @@ addEventListener('keydown', e => {
   if (mode === 'start' || mode === 'lobby') return;
   const ch = charOf(e);
   if (DR.on) { // tricky-key practice has the keyboard
-    if (e.key === 'Escape' || e.key === 'Tab') { endDrill(false); e.preventDefault(); } else if (ch) { e.preventDefault(); typeChar(ch); }
+    if (e.key === 'Tab') { endDrill(false); e.preventDefault(); } else if (ch) { e.preventDefault(); typeChar(ch); }
     return;
   }
   if (document.querySelector('.screen:not(.hidden)')) return;
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }
-  // Tab stops typing; Tab or Q goes back outside. Esc does the same, but in most browsers it also leaves full screen.
-  if (e.key === 'Escape' || e.key === 'Tab') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }
+  // Tab stops typing; Tab or Q goes back outside. Esc is not used: it belongs to the browser, for leaving full screen.
+  if (e.key === 'Tab') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }
   if (inside && !engaged && ch && ch.toLowerCase() === 'q') { leaveBuilding(); e.preventDefault(); return; }
   if (e.key === 'Enter') { pressEnter(); e.preventDefault(); return; }
   if (e.key === 'Backspace') { e.preventDefault(); return; }
