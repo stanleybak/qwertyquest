@@ -591,7 +591,7 @@ const DRILL_EVERY = 3;
 const drillEls = () => ({ prompt: $('dprompt'), found: $('dfound') });
 function offerDrill() {
   P.sinceDrill = 0;
-  const keys = S.troubleKeys(P, 3);
+  const keys = S.troubleKeys(P, 4);
   if (!keys.length) return; // nothing is giving this player trouble
   DR.keys = keys;
   const box = $('drillKeys'); box.innerHTML = '';
@@ -608,6 +608,7 @@ function offerDrill() {
 }
 function startDrill() {
   Object.assign(DR, { on: true, list: S.drillSet(P, DR.keys), i: 0, clean: 0 });
+  DR.total = DR.list.length;
   $('drillIntro').classList.add('hidden'); $('drillRun').classList.remove('hidden');
   $('drillGo').blur();
   $('dkb').appendChild($('kb')); // the keyboard picture helps here too
@@ -617,7 +618,13 @@ function nextDrill() {
   $('drillBar').style.width = DR.i / DR.list.length * 100 + '%';
   if (DR.i >= DR.list.length) return endDrill(true);
   DR.slip = false; // the keyboard picture stays away until a key is missed
-  setPrompt(DR.list[DR.i], drillEls(), () => { if (!T.miss) DR.clean++; DR.i++; nextDrill(); });
+  setPrompt(DR.list[DR.i], drillEls(), () => {
+    const p = DR.list[DR.i];
+    if (!T.miss) DR.clean++;
+    // A line typed with a slip comes back a little later, until it is typed with none (three returns at most).
+    else if ((p.again | 0) < 3) DR.list.splice(Math.min(DR.list.length, DR.i + 3), 0, { ...p, again: (p.again | 0) + 1 });
+    DR.i++; nextDrill();
+  });
 }
 function endDrill(finished) {
   const was = DR.on;
@@ -627,7 +634,8 @@ function endDrill(finished) {
   if (finished) {
     const gift = P.shields < 3;
     if (gift) P.shields++;
-    toast(`💪 Practice done: ${DR.clean} of ${DR.list.length} with no slips!` + (gift ? ' You earned a 🛡️ shield.' : ''), 'gold'); sfx.win();
+    const back = DR.list.length - DR.total;
+    toast('💪 Practice done!' + (back ? ` ${back} ${back === 1 ? 'line' : 'lines'} came back for another go.` : ' Not one slip!') + (gift ? ' You earned a 🛡️ shield.' : ''), 'gold'); sfx.win();
   }
   S.saveProfile(P);
 }

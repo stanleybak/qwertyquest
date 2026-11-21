@@ -393,9 +393,9 @@ export function troubleKeys(p, n = 3) {
     .sort((a, b) => errRate(b[1]) - errRate(a[1])).slice(0, n).map(x => x[0]);
 }
 /**
- * A short drill for the keys in `hard`: each one back and forth with a key the
- * player finds easy, then doubled, then the hard ones mixed together, and last
- * a few real words that lean on those keys, the longer the better.
+ * A short drill for the keys in `hard`: each one woven between three keys the
+ * player finds easy, then the hard ones mixed together, and last a few real
+ * words that lean on those keys, the longer the better.
  */
 export function drillSet(p, hard) {
   let easy = learned(p).filter(c => !hard.includes(c) && p.keys[keyId(c)]?.n >= 5)
@@ -403,8 +403,13 @@ export function drillSet(p, hard) {
   if (!easy.length) easy = STAGES[0].keys.split('').filter(c => !hard.includes(c));
   if (!easy.length) easy = [hard[0]];
   const out = [];
-  for (const h of hard) { const e = pick(easy); out.push([h, e, h, e, h], [h, h, e, h, h]); }
-  out.push(Array.from({ length: 5 }, (_, k) => (k === 2 ? pick(easy) : hard[k % hard.length])));
+  const some = () => [...easy].sort(() => Math.random() - 0.5); // the easy keys, shuffled: three or four different letters in every line
+  for (const h of hard) {
+    const [a, b = a, c = a] = some();
+    out.push([h, a, h, b, h, c]);
+    if (hard.length <= 2) { const [d, e = d] = some(); out.push([d, h, h, e, h, d]); }
+  }
+  out.push(Array.from({ length: 6 }, (_, k) => (k === 3 ? pick(easy) : hard[(k > 3 ? k - 1 : k) % hard.length])));
   const drills = out.map(a => ({ text: a.join(''), spaced: true }));
   // words: the ones with the most tricky letters in them, each tricky key getting its turn
   const uses = w => [...w].filter(c => hard.includes(c)).length;
