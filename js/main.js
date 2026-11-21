@@ -12,10 +12,10 @@ import VERSION from './version.js';
 const $ = id => document.getElementById(id);
 const BUILD = '2026-11-14s';
 const P = S.loadProfile();
-let mode = 'start';            // start | place | game
+let mode = 'start';            // start | lobby | game
 let st = newState();           // shared city state (host-owned)
 let host = null;               // rules engine, present while this peer runs the game
-let net = null, roomId = null, roomLabel = '';
+let net = null, roomId = null, roomLabel = '', roomCode = '';
 let lastEv = 0, gotState = false, savedTotal = -1;
 const me = { x: 0, y: 60, face: 1, walk: false, stumble: 0, prog: 0, me: true, act: -1, boat: false };
 const others = new Map();
@@ -35,7 +35,7 @@ let engaged = null;            // what the player chose to work on by pressing E
 // ---------- sound ----------
 let ac = null;
 function beep(freq, dur = 0.07, type = 'sine', vol = 0.08, when = 0) {
-  if (!P.sound) return;
+  if (!P.sound || document.hidden) return; // a tab nobody is looking at stays quiet
   try {
     ac ||= new AudioContext();
     if (ac.state === 'suspended') ac.resume(); // after a reload the browser waits for a key press
@@ -66,7 +66,7 @@ function pickVoice() {
 }
 if (window.speechSynthesis) { pickVoice(); speechSynthesis.addEventListener?.('voiceschanged', pickVoice); }
 function say(text) {
-  if (!P.sound || !P.vol || !text || !window.speechSynthesis) return;
+  if (!P.sound || !P.vol || document.hidden || !text || !window.speechSynthesis) return;
   try {
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -79,20 +79,20 @@ const vol = () => Math.min(1, P.vol * 1.3);
 const KEY_NAMES = { ';': 'semicolon', ',': 'comma', '.': 'period', '/': 'slash', ' ': 'space', '\'': 'apostrophe' };
 // letter drills: say just the next letter, by name
 function sayLetter(c) {
-  if (!P.sound || !P.vol || Voice.busy('npc')) return;
+  if (!P.sound || !P.vol || document.hidden || Voice.busy('npc')) return;
   const name = KEY_NAMES[c] || c.toLowerCase();
   if (!Voice.play('l/' + name, vol(), 'word')) say(KEY_NAMES[c] || c.toUpperCase());
 }
 /** Read a word prompt aloud: recorded clips when we have them, the device voice otherwise. */
 function sayWords(text) {
-  if (!P.sound || !P.vol || Voice.busy('npc')) return;
+  if (!P.sound || !P.vol || document.hidden || Voice.busy('npc')) return;
   const words = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
   if (Voice.play('p/' + words.join('-'), vol(), 'word')) return; // a whole phrase, recorded in one breath
   if (!Voice.play(words.map(w => 'w/' + w), vol(), 'word')) say(text);
 }
 /** A character speaks. Lines are recorded by tools/build_voices.py. */
 function npc(...ids) {
-  if (!P.sound || !P.vol) return;
+  if (!P.sound || !P.vol || document.hidden) return;
   window.speechSynthesis?.cancel();
   Voice.play(ids.map(i => 'n/' + i).filter(Voice.has), vol(), 'npc');
 }
@@ -200,7 +200,7 @@ function updateKb(next) {
   const kb = $('kb');
   // The guide is a crutch, so it only appears when it helps: while keys are
   // new, after a slip, or when the player has been stuck on a key for a while.
-  const show = mode === 'place' ? !!T.p : P.guide && mode === 'game' && (!!T.p || !!CH.opts)
+  const show = DR.on ? !!T.p : P.guide && mode === 'game' && (!!T.p || !!CH.opts)
     && (P.fresh > 0 || P.step < 5 || (P.layout === 'dvorak' && P.step < S.STAGES.length) || T.miss > 0 || performance.now() - Math.max(T.last, T.shown) > 4000);
   if (show === kbShown && next === kbNext) return;
   kbShown = show; kbNext = next;
@@ -220,7 +220,10 @@ function updateKb(next) {
   }
 }
 
-// ---------- typing engine (shared by the warm-up and the game) ----------
+// ---------- typing engine (shared by the game and the tricky-key practice) ----------
+const DR = { on: false, keys: [], list: [], i: 0, clean: 0 }; // tricky-key practice, see below
+/** Typing that counts: toward lessons, streaks and shields. Practice does not. */
+const live = () => mode === 'game' && !DR.on;
 const T = { shown: 0, errs: new Set(), p: null, pos: 0, clean: true, last: 0, t0: 0, hits: 0, miss: 0, els: null, onDone: null, key: null };
 
 function setPrompt(p, els, onDone) {
@@ -260,7 +263,7 @@ function typeChar(ch) {
     const before = T.last;
     S.recordKey(P, want, true, T.pos > 0 ? now - T.last : 0);
     T.last = now; T.hits++; T.pos++;
-    if (mode === 'game') S.lessonKey(P, true, T.pos > 1 ? now - before : 0);
+    if (live()) S.lessonKey(P, true, T.pos > 1 ? now - before : 0);
     firstHit(want);
     sfx.key();
     if (T.pos >= T.p.text.length) { const cb = T.onDone; cb((now - T.t0) / 1000); return; }
@@ -271,7 +274,7 @@ function typeChar(ch) {
   S.recordKey(P, want, false, 0);
   T.miss++; T.bad.add(T.pos); T.errs.add(want === ' ' ? 'space' : want.toLowerCase());
   sfx.bad();
-  if (mode === 'game') {
+  if (live()) {
     S.lessonKey(P, false);
     me.stumble = 0.5;
     if (P.shields > 0 && T.clean) { P.shields--; floatText('🛡️ saved!', me.x, me.y - 100, '#2f7de1'); }
@@ -285,7 +288,9 @@ function typeChar(ch) {
 }
 
 // ---------- choices: several labels on offer, type one to pick it ----------
-const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || inside.m.game === 'order');
+/** The spot being filled in a room where the right thing has to be chosen for it, or -1. */
+const pickSpot = () => (inside && !inside.job && inside.m.pick && engaged && engaged.startsWith('i') ? +engaged.split(':').pop() : -1);
+const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || inside.m.game === 'order' || pickSpot() >= 0);
 /** The key the guide should point at: only known when one choice is left in play. */
 function nextKey() {
   if (T.p) return T.p.text[T.pos];
@@ -295,9 +300,15 @@ function nextKey() {
 }
 function dealChoices() {
   const g = inside.g, m = inside.m;
-  let opts;
-  if (m.game === 'maze') { g.labels = {}; opts = G.exits(g.mz, g.cell).map(d => ({ id: d, icon: G.ARROWS[d] })); }
-  else { // this player's own item, plus a few others still on the shelf to tell it apart from
+  const spot = pickSpot();
+  let opts, shut = false;
+  if (m.game === 'maze') { // every way out, except through a door that is still locked
+    const all = G.exits(g.mz, g.cell), ways = all.filter(d => !G.locked(g.mz, g.cell, d, g.hasKey));
+    g.labels = {}; shut = ways.length < all.length; opts = ways.map(d => ({ id: d, icon: G.ARROWS[d] }));
+  } else if (spot >= 0) { // the thing that belongs here, among a few that do not
+    const rest = [0, 1, 2, 3, 4, 5].filter(k => k !== spot && !(inside.mask >> k & 1)).map(k => inside.perm[k]).sort(() => Math.random() - 0.5).slice(0, 3);
+    g.labels = {}; opts = [inside.perm[spot], ...rest].sort((a, b) => a - b).map(i => ({ id: i, icon: m.items[i] }));
+  } else { // this player's own item, plus a few others still on the shelf to tell it apart from
     const rest = g.seq.filter(i => !(inside.mask >> i & 1) && i !== inside.want).slice(0, 3);
     opts = [inside.want, ...rest].sort((a, b) => a - b).map(i => ({ id: i, icon: m.items[i] }));
   }
@@ -315,7 +326,9 @@ function dealChoices() {
   CH.opts = opts; CH.buf = ''; CH.clean = true;
   T.errs = new Set(); T.miss = 0; T.shown = performance.now();
   $('panel').classList.remove('again');
-  $('hint').textContent = (m.game === 'maze' ? 'Which way? Type the word by an arrow.'
+  $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + 'Which way? Type the word by an arrow.'
+    : m.pick === 'color' ? 'Which book matches the color of this shelf tag? Type its word.'
+    : spot >= 0 ? 'What goes in this spot? Type its word.'
     : `${m.who} wants ${m.items[inside.want]} from you. Type its word.`) + '  (Esc to stop)';
   paintChoices();
 }
@@ -372,10 +385,19 @@ function chose(o) {
     paintChoices();
     return;
   }
+  const spot = pickSpot();
+  if (spot >= 0 && o.id !== inside.perm[spot]) {
+    $('hint').textContent = (m.pick === 'color' ? 'That book is a different color. Look at the tag!' : 'That does not go here. Take another look!') + '  (Esc to stop)';
+    if (m.pick === 'memory') inside.peek = 2.5; // a quick look at the plan
+    beep(220, 0.14, 'triangle', 0.06);
+    paintChoices();
+    return;
+  }
   sfx.load();
-  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'order' ? roomKey(inside.id) : undefined, slot: o.id });
+  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'maze' ? undefined : roomKey(inside.id), slot: spot >= 0 ? spot : o.id });
   CH.opts = null; $('prompt').innerHTML = '';
-  if (m.game === 'maze') { g.path = G.runFrom(g.mz, g.cell, o.id); g.cell = g.path[g.path.length - 1]; }
+  if (m.game === 'maze') { g.path = G.runFrom(g.mz, g.cell, o.id, g.hasKey); g.cell = g.path[g.path.length - 1]; }
+  else if (spot >= 0) { inside.mask |= 1 << spot; inside.last = spot; inside.want = -1; inside.pop = 0; inside.talk = 0; }
   else {
     delete g.labels[o.id];
     inside.mask |= 1 << o.id; inside.want = -1; inside.pop = 0;
@@ -388,6 +410,13 @@ function finishRoom() {
   P.thanks++;
   toast(`❤️ ${inside.m.who} says thank you!`, 'gold');
   sfx.win(); npc(`m_${inside.m.id}_done`); inside.talk = 7;
+  const g = inside.g, rival = inside.m.rival;
+  if (rival && g.raced && !g.lost) { // won the race
+    g.lost = true;
+    const shield = P.shields < 3;
+    if (shield) P.shields++; else P.crane += 3;
+    setTimeout(() => toast(`🏆 You beat ${rival[1]}! You win a ${shield ? '🛡️ shield' : '🏗️ crane'}.`, 'gold'), 1200);
+  }
   S.saveProfile(P);
 }
 
@@ -404,8 +433,10 @@ function layoutButtons(el, get, set) {
   }
 }
 /** New keys (or a new job) unlocked: stop and celebrate. */
-function party(title, keys, note) {
+function party(title, keys, note, promoted = false) {
   $('partyTitle').textContent = title;
+  $('partyGo').textContent = promoted ? 'Go to the next level ▶' : 'Keep going ▶';
+  $('partyStay').classList.toggle('hidden', !promoted);
   const box = $('partyKeys'); box.innerHTML = '';
   for (const k of keys) {
     const d = document.createElement('div'); d.className = 'cap'; d.textContent = k.toUpperCase();
@@ -419,6 +450,28 @@ function party(title, keys, note) {
   confetti(me.x, me.y - 60, 160); sfx.win(); npc('promo');
   [300, 700, 1100].forEach(ms => setTimeout(() => { confetti(me.x + (Math.random() - 0.5) * 500, me.y - 100 - Math.random() * 200, 60); }, ms));
 }
+const setCrew = code => { try { localStorage.setItem('qq.crew', code); } catch { /* ignore */ } };
+/** Four random words: easy to read out over the phone, hard to guess. */
+function makeCode() {
+  const ws = DATA.words.flat().filter(w => w.length >= 4 && w.length <= 6), r = crypto.getRandomValues(new Uint32Array(4));
+  return [...r].map(n => ws[n % ws.length]).join(' ');
+}
+/** Take a room code out of the page address, so the choice made on screen is the one that counts. */
+function dropHashRoom() {
+  const q = new URLSearchParams(location.hash.slice(1));
+  if (!q.has('room')) return;
+  q.delete('room');
+  history.replaceState(null, '', location.pathname + location.search + (q.toString() ? '#' + q : ''));
+}
+/** Fill the screen. Only works from a click or a key press. */
+function goFull() {
+  try {
+    const el = document.documentElement;
+    if (document.fullscreenElement || !el.requestFullscreen) return;
+    // Esc is the game's own "stop" key: where the browser allows it, keep Esc from closing full screen
+    el.requestFullscreen().then(() => navigator.keyboard?.lock?.(['Escape'])).catch(() => {});
+  } catch { /* stay in the window */ }
+}
 function initStart() {
   const row = $('colors');
   COLORS.forEach((c, i) => {
@@ -431,67 +484,113 @@ function initStart() {
   $('name').focus();
   let layout = P.layout;
   layoutButtons($('layouts'), () => layout, l => { layout = l; });
+  // who to play with: everyone on this network, or everyone who types the same room code
+  const saved = new URLSearchParams(location.hash.slice(1)).get('room') || crewWord();
+  let useCode = !!saved;
+  $('code').value = saved;
+  const paintNet = () => {
+    $('netLan').classList.toggle('sel', !useCode); $('netCode').classList.toggle('sel', useCode);
+    $('codeBox').classList.toggle('hidden', !useCode);
+    $('netnote').textContent = useCode ? 'Everyone who types the same code builds the same city, wherever they are.' : 'Everyone on your Wi-Fi builds the same city.';
+  };
+  $('netLan').onclick = () => { useCode = false; paintNet(); };
+  $('netCode').onclick = () => { useCode = true; paintNet(); $('code').focus(); };
+  $('codeMake').onclick = () => { $('code').value = makeCode(); $('code').focus(); };
+  paintNet();
   const go = () => {
+    const code = useCode ? $('code').value.trim() : '';
+    if (useCode && !code) { $('code').focus(); return; }
+    setCrew(code); dropHashRoom();
     S.switchLayout(P, layout);
     buildKb();
     P.name = $('name').value.trim().slice(0, 12) || 'builder';
     S.saveProfile(P);
     $('start').classList.add('hidden');
-    if (P.placed) startGame(); else startPlacement();
+    if (P.placed) { goFull(); startGame(); } else chooseLevel();
   };
   $('go').onclick = go;
-  $('name').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  for (const id of ['name', 'code']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 }
 
-// ---------- warm-up (placement) ----------
-const PL = { i: 0, n: 0, hit: 0, miss: 0, time: 0, placed: 0, t0: 0, timer: null, again: false };
-const PLACE_SECS = 90;
-function startPlacement() {
-  mode = 'place';
+// ---------- choosing a level ----------
+// The player picks where to start. The game still moves them up as they get
+// better (and asks first), and the level can be changed at any time.
+function chooseLevel() {
+  const box = $('levels'); box.innerHTML = '';
+  let at = Math.min(P.step, S.MAX_STEP);
+  const play = () => {
+    if (P.step !== at || !P.placed) { P.step = at; P.credits = 0; P.badRun = 0; P.fresh = 12; P.lesson = { n: 0, hit: 0, miss: 0 }; }
+    P.placed = true;
+    S.saveProfile(P);
+    $('place').classList.add('hidden');
+    goFull(); startGame();
+  };
+  for (let i = 0; i <= S.MAX_STEP; i++) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = i === at ? 'sel' : '';
+    const n = document.createElement('b'); n.textContent = i + 1;
+    const t = document.createElement('span'); t.textContent = S.stepName(i);
+    const k = document.createElement('small');
+    k.textContent = i < S.STAGES.length ? 'new keys: ' + S.STAGES[i].keys.toUpperCase().split('').join(' ') : ['Shift and . , ? !', 'whole sentences', 'longer and faster', 'the hardest'][i - S.STAGES.length];
+    b.append(n, t, k);
+    b.onclick = () => { at = i; [...box.children].forEach((x, j) => x.classList.toggle('sel', j === i)); };
+    b.ondblclick = play;
+    box.appendChild(b);
+  }
   $('place').classList.remove('hidden');
-  $('pkb').appendChild($('kb')); // the keyboard picture helps here too
-  Object.assign(PL, { i: 0, n: 0, hit: 0, miss: 0, time: 0, placed: 0, t0: 0, again: false });
-  nextProbe();
-  PL.timer = setInterval(() => {
-    if (!PL.t0) return; // the clock starts on the first key
-    const left = PLACE_SECS - (performance.now() - PL.t0) / 1000;
-    $('placebar').style.width = Math.max(0, left / PLACE_SECS * 100) + '%';
-    if (left <= 0) endPlacement(PL.placed);
-  }, 200);
-  $('placebar').style.width = '100%';
-  $('skip').onclick = () => endPlacement(0);
+  box.children[at].scrollIntoView({ block: 'center' });
+  $('levelGo').onclick = play;
+  $('levelGo').focus();
 }
-function nextProbe() {
-  const probe = S.PROBES[PL.i];
-  setPrompt(S.probePrompt(P, probe), { prompt: $('pprompt'), found: $('pfound') }, secs => {
-    // A letter counts as missed once, however many wrong keys it took: fumbling
-    // for one key says little about the rest.
-    PL.hit += T.hits; PL.miss += T.bad.size; PL.time += secs;
-    if (++PL.n < probe.n) return nextProbe();
-    // Always room for two misses in a round; beyond that, one letter in five (one in eight on the harder rounds).
-    const allowed = Math.max(2, Math.floor(PL.hit * (probe.step < 9 ? 0.2 : 0.12))), cps = PL.hit / Math.max(0.5, PL.time);
-    const pass = PL.miss <= allowed && cps >= probe.cps;
-    Object.assign(PL, { n: 0, hit: 0, miss: 0, time: 0 });
-    if (pass) {
-      PL.placed = probe.place; PL.i++; PL.again = false;
-      return PL.i < S.PROBES.length ? nextProbe() : endPlacement(PL.placed);
-    }
-    if (!PL.again) { PL.again = true; return nextProbe(); } // one rough round is not the end: try this level once more
-    endPlacement(PL.placed);
-  });
+
+// ---------- tricky-key practice ----------
+// Every few buildings, the keys this player slips on most get a short drill of
+// their own: each tricky key back and forth with an easy one, then all of them
+// mixed. It is offered, never forced, and does not count toward lessons.
+const DRILL_EVERY = 3;
+const drillEls = () => ({ prompt: $('dprompt'), found: $('dfound') });
+function offerDrill() {
+  P.sinceDrill = 0;
+  const keys = S.troubleKeys(P, 3);
+  if (!keys.length) return; // nothing is giving this player trouble
+  DR.keys = keys;
+  const box = $('drillKeys'); box.innerHTML = '';
+  for (const k of keys) {
+    const d = document.createElement('div'); d.className = 'cap'; d.textContent = k.toUpperCase();
+    const f = document.createElement('small'); f.textContent = fingerOf(k);
+    const w = document.createElement('div'); w.append(d, f); box.appendChild(w);
+  }
+  $('drillSub').textContent = `${DRILL_EVERY} more buildings are up! These are the keys that trip you up the most. A little practice makes them easy.`;
+  $('drillIntro').classList.remove('hidden'); $('drillRun').classList.add('hidden');
+  $('drill').classList.remove('hidden');
+  $('drillGo').focus();
+  held.clear(); beep(660, 0.1, 'sine', 0.06); beep(880, 0.14, 'sine', 0.06, 0.12);
 }
-function endPlacement(step) {
-  if (mode !== 'place') return;
-  clearInterval(PL.timer);
-  P.step = step; P.placed = true; P.credits = 0; P.fresh = 12;
+function startDrill() {
+  Object.assign(DR, { on: true, list: S.drillSet(P, DR.keys), i: 0, clean: 0 });
+  $('drillIntro').classList.add('hidden'); $('drillRun').classList.remove('hidden');
+  $('drillGo').blur();
+  $('dkb').appendChild($('kb')); // the keyboard picture helps here too
+  nextDrill();
+}
+function nextDrill() {
+  $('drillBar').style.width = DR.i / DR.list.length * 100 + '%';
+  if (DR.i >= DR.list.length) return endDrill(true);
+  setPrompt(DR.list[DR.i], drillEls(), () => { if (!T.miss) DR.clean++; DR.i++; nextDrill(); });
+}
+function endDrill(finished) {
+  const was = DR.on;
+  DR.on = false;
+  if (was) { setPrompt(null, drillEls(), null); $('panel').appendChild($('kb')); }
+  $('drill').classList.add('hidden');
+  if (finished) {
+    const gift = P.shields < 3;
+    if (gift) P.shields++;
+    toast(`💪 Practice done: ${DR.clean} of ${DR.list.length} with no slips!` + (gift ? ' You earned a 🛡️ shield.' : ''), 'gold'); sfx.win();
+  }
   S.saveProfile(P);
-  setPrompt(null, { prompt: $('pprompt'), found: $('pfound') }, null);
-  $('panel').appendChild($('kb'));
-  $('place').classList.add('hidden');
-  toast(`You start at level ${step + 1}: ${S.stepName(step)}.`, 'gold');
-  startGame();
 }
-addEventListener('keydown', e => { if (mode === 'place' && !PL.t0 && charOf(e)) PL.t0 = performance.now(); }, true);
+$('drillGo').onclick = startDrill;
+$('drillSkip').onclick = () => endDrill(false);
 
 // ---------- network glue ----------
 function profileMsg() {
@@ -593,7 +692,7 @@ const handlers = {
       o.prog = Math.min(1, Math.max(0, data[2] / 100 || 0));
       o.walk = !!(data[3] & 1); if (data[3] & 2) o.stumble = 0.5;
       o.face = data[4] < 0 ? -1 : 1;
-      o.boat = !!(data[3] & 4); o.inside = !!(data[3] & 8); o.act = data[5] | 0;
+      o.boat = !!(data[3] & 4); o.inside = !!(data[3] & 8); o.away = !!(data[3] & 16); // away: their tab is in the background o.act = data[5] | 0;
       const was = o.in, wasScene = o.scene;
       o.in = o.inside && typeof data[6] === 'string' ? data[6].slice(0, 12) : ''; o.tix = +data[7] || 0; o.tiy = +data[8] || 0;
       o.want = o.in && Number.isInteger(data[9]) ? data[9] : -1; o.scene = typeof data[10] === 'string' ? data[10].slice(0, 8) : '';
@@ -607,6 +706,10 @@ const handlers = {
       if (isNew && o.name && mode === 'game' && performance.now() - enteredAt > 4000) toast(`👋 ${o.name} joined the city!`, 'gold');
     }
     else if (kind === 'grant') grant(data.t | 0);
+    else if (kind === 'move') { // the host is taking the city to a room that friends can reach over the internet
+      const code = from === net.hostId && typeof data?.code === 'string' ? data.code.trim().slice(0, 40) : '';
+      if (code) { toast('🌍 The city is opening to friends over the internet. One moment…', 'gold'); setTimeout(() => moveTo(code), 1500); }
+    }
     else if (!host) return;
     else if (kind === 'done') host.done(from, data || {});
     else if (kind === 'offer') host.offer(data);
@@ -623,7 +726,7 @@ function handleEvents() {
   for (const ev of st.ev) {
     if (ev.id <= lastEv) continue;
     lastEv = ev.id;
-    if (ev.t === 'built') { const s = district(ev.d).sites[ev.site]; if (s && nearMe(s.x, s.y) && !inside) { confetti(s.x, s.y - 80); sfx.win(); tip('built'); } }
+    if (ev.t === 'built') { P.sinceDrill = (P.sinceDrill | 0) + 1; const s = district(ev.d).sites[ev.site]; if (s && nearMe(s.x, s.y) && !inside) { confetti(s.x, s.y - 80); sfx.win(); tip('built'); } }
     else if (ev.t === 'district') {
       toast(`🎉 ${ev.name} is finished! A new neighborhood opens: ${district(ev.d + 1).name}`, 'gold');
       confetti(me.x, me.y - 60, 120); sfx.win(); if (!inside) npc('district');
@@ -670,7 +773,7 @@ async function startGame() {
   buildKb();
   const q = new URLSearchParams(location.hash.slice(1)), code = q.get('room') || crewWord();
   const room = await findRoom(code, q.get('lan'));
-  roomId = room.id; roomLabel = room.label;
+  roomId = room.id; roomLabel = room.label; roomCode = code;
   net = new Net(handlers);
   applyProfile(me, profileMsg());
   $('lobby').classList.remove('hidden');
@@ -711,8 +814,8 @@ function paintLobby() {
   const add = (tag, text, cls) => { const x = document.createElement(tag); x.textContent = text; if (cls) x.className = cls; el.appendChild(x); };
   const name = net.asking ? net.asking.name : net.world?.name;
   if (name) { add('h2', '🏙️ Joining…'); add('p', `Walking into ${name}.`, 'sub'); }
-  else if (lobbyReady && openCities().length) { add('h2', '✨ One moment…'); add('p', 'The city here is getting an update.', 'sub'); }
-  else { add('h2', '🔎 Looking for your city…'); add('p', 'Checking who is building on your Wi-Fi.', 'sub'); }
+  else if (lobbyReady && openCities().length) { add('h2', '✨ One moment…'); add('p', 'The city here runs a different version of the game. If a green Update button shows, press it.', 'sub'); }
+  else { add('h2', '🔎 Looking for your city…'); add('p', roomCode ? `Checking who is building in room ${roomCode}.` : 'Checking who is building on your Wi-Fi.', 'sub'); }
 }
 
 // ---------- the game ----------
@@ -725,24 +828,17 @@ function saveAll() {
 // ---------- updates ----------
 // version.json holds a hash of the game's files, and js/version.js holds the
 // hash this running copy was built with. When they differ, a newer game has
-// been published. Everyone in a city has to run the same version, so the game
-// updates itself as soon as the player is not in the middle of typing, and
-// comes back to the same spot.
-let latest = null, staleFor = 0, lastCheck = 0;
+// been published, and a green Update button appears. Nothing reloads until the
+// player presses it; then the game comes back to the same spot. Everyone in a
+// city has to run the same version, so a city's players update together.
+let latest = null, lastCheck = 0;
 async function reloadInPlace() {
   saveAll();
   if (net?.world && host) saveWorld(net.world, st);
-  try {
-    sessionStorage.setItem('qq.resume', '1');
-    if (latest) sessionStorage.setItem('qq.upd', `${latest.hash}:${updTries() + 1}`);
-  } catch { /* ignore */ }
+  try { sessionStorage.setItem('qq.resume', '1'); } catch { /* ignore */ }
   // refresh the browser's copies first, or the reload could bring back the old files
   if (latest) await Promise.all((latest.files || []).map(f => fetch(f, { cache: 'reload' }).catch(() => {})));
   location.reload();
-}
-/** How many times this tab already reloaded for the newest version (a stuck cache must not loop forever). */
-function updTries() {
-  try { const [h, n] = (sessionStorage.getItem('qq.upd') || ':0').split(':'); return latest && h === latest.hash ? +n : 0; } catch { return 0; }
 }
 async function checkVersion() {
   lastCheck = performance.now();
@@ -751,20 +847,28 @@ async function checkVersion() {
     const v = await r.json();
     if (!v.hash || v.hash === VERSION) { latest = null; $('update').classList.add('hidden'); return; }
     if (!latest || latest.hash !== v.hash) { latest = v; beep(660, 0.1, 'sine', 0.06); beep(990, 0.14, 'sine', 0.06, 0.1); }
-    if (mode !== 'game') { if (mode !== 'place' && updTries() < 2) reloadInPlace(); return; } // nothing to interrupt yet
     $('update').classList.remove('hidden');
   } catch { /* offline, or no version file: try again later */ }
 }
 /** Someone here runs a different version: find out at once whether this copy is the old one. */
 function versionClash() { if (performance.now() - lastCheck > 1500) checkVersion(); }
 checkVersion(); setInterval(checkVersion, 5000);
-setInterval(() => {
-  if (!latest || mode !== 'game') return;
-  const auto = updTries() < 2;
-  if (engaged || !auto) { staleFor = 0; $('updateMsg').textContent = auto ? '✨ A new version is ready. It loads when you finish this.' : '✨ A new version is ready.'; return; }
-  $('updateMsg').textContent = `✨ Updating in ${Math.max(0, 3 - staleFor)}…`;
-  if (++staleFor > 3) reloadInPlace();
-}, 1000);
+
+// ---------- opening a city to the internet ----------
+/** Go to the room for `code`, taking this device's copy of the city along. */
+function moveTo(code) {
+  setCrew(code); dropHashRoom();
+  try { sessionStorage.setItem('qq.newcode', '1'); } catch { /* ignore */ }
+  reloadInPlace();
+}
+/** Host: make a room code and take the whole city, everyone in it included, to that room. */
+function openToInternet() {
+  if (!net.isHost) return;
+  const code = makeCode();
+  net.broadcast('move', { code });
+  toast('🌍 Opening the city to friends over the internet…', 'gold');
+  setTimeout(() => moveTo(code), 700);
+}
 
 function enterCity() {
   mode = 'game'; enteredAt = performance.now();
@@ -782,6 +886,9 @@ function enterCity() {
   cam.x = me.x; cam.y = me.y;
   if (!roomId) toast('Could not reach the network. Playing solo for now.');
   else toast(`Welcome to ${net.world.name}!`, 'gold');
+  let fresh = false;
+  try { fresh = !!sessionStorage.getItem('qq.newcode'); sessionStorage.removeItem('qq.newcode'); } catch { /* ignore */ }
+  if (fresh && roomCode) crewOpen(true); // show the new room code, to read out to friends
   if (timersOn) return;
   timersOn = true;
   setInterval(hostTick, 250);
@@ -805,6 +912,11 @@ function hostTick() {
 }
 
 let lastPos = '', lastPosAt = 0, heldAt = 0, lastMe = 0;
+// Looking at another tab: go quiet here, and tell the others at once so they see this builder as away.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { Voice.stop(); window.speechSynthesis?.cancel(); held.clear(); }
+  if (mode === 'game') sendPos();
+});
 /** Which building this player is in and where, so others in the same one can see them. */
 function whereInside() {
   const g = inside.g, game = inside.job ? 'room' : inside.m.game;
@@ -814,7 +926,7 @@ function whereInside() {
 }
 function sendPos() {
   if (!net || !net.peers.size) return;
-  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0), me.face, me.act, ...(inside ? [...whereInside(), claim(), scene()] : [])];
+  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0) | (document.hidden ? 16 : 0), me.face, me.act, ...(inside ? [...whereInside(), claim(), scene()] : [])];
   const k = m.join(), now = performance.now();
   if (now - lastMe > 8000) { lastMe = now; net.broadcast('me', profileMsg()); } // names reach anyone who missed the first hello
   if (k === lastPos && now - lastPosAt < 1000) return;
@@ -888,7 +1000,8 @@ function enterBuilding(id) {
   let mask = toMask(roomKey(id), rooms()[roomKey(id)]);
   if (m.game === 'maze' && mask !== 63) mask = 0; // a maze starts over on each visit
   const placed = bits(mask);
-  inside = { id, m, placed, mask, want: -1, last: -1, fin: placed >= 6, pop: 1, x: job ? 0.96 : 0.86, y: job ? 0.5 : 0.35, talk: 7, wig: null, near: null, job: job ? job.id : 0, out: new Set(), nearF: -1, g: G.newGame(m, id, placed) };
+  inside = { id, m, placed, mask, want: -1, last: -1, fin: placed >= 6, pop: 1, x: job ? 0.96 : 0.86, y: job ? 0.5 : 0.35, talk: 7, wig: null, near: null, job: job ? job.id : 0, out: new Set(), nearF: -1, g: G.newGame(m, id, placed),
+    perm: m.pick ? G.orderSeq(id) : null, peek: m.pick === 'memory' && placed < 6 && !job ? 9 : 0 };
   auto = null; held.clear(); stopTyping();
   if (job) greeted.add(job.id);
   npc(job ? `job${job.t}` : placed >= 6 ? `m_${m.id}_done` : `m_${m.id}`);
@@ -971,6 +1084,7 @@ function finishPrompt(secs) {
   const slot = inside && !job && inside.m.game === 'furnish' ? +key.split(':').pop() : undefined; // which spot in the room
   net.toHost('done', { site: inside ? -1 : T.site, clean: ok, boss, n, job, room: inside && !job ? roomKey(inside.id) : undefined, slot });
   lastSlip = !ok;
+  if (ok && secs > 0.3 && p.text.length > 2) { const c = (p.text.length - 1) / secs; P.cps = P.cps ? P.cps * 0.8 + c * 0.2 : c; } // how fast this player types, for pacing a race
   if (!ok) {
     // Not delivered. The same prompt returns after the next one, until it is typed with no slips.
     redo.push({ ...p, step: P.step }); // every slipped prompt stays owed; none is ever dropped
@@ -1006,7 +1120,7 @@ function tally(p, clean, errs, secs) {
     if (res.promoted) {
       const fresh = P.step < S.STAGES.length ? `New keys: ${S.STAGES[P.step].keys.toUpperCase().split('').join(' and ')}` : `New job: ${S.stepName(P.step)}`;
       const keys = P.step < S.STAGES.length ? S.STAGES[P.step].keys.split('') : [];
-      setTimeout(() => party(keys.length ? 'New keys unlocked!' : 'Promotion!', keys, (res.fast ? 'So fast and so accurate: you get to skip ahead! ' : '') + (keys.length ? 'The keyboard picture will show you where they are.' : fresh)), 900);
+      setTimeout(() => party(keys.length ? 'New keys unlocked!' : 'Promotion!', keys, (res.fast ? 'So fast and so accurate: you get to skip ahead! ' : '') + (keys.length ? 'The keyboard picture will show you where they are.' : fresh) + ' Or stay and practice this level some more.', true), 900);
     }
     if (res.ready) setTimeout(() => toast('That is plenty of new keys for one day. More unlock tomorrow: sleep makes fingers smarter!'), 900);
     if (res.demoted) setTimeout(() => toast('Let\'s spend a little more time on the last keys.'), 900);
@@ -1064,7 +1178,7 @@ function updatePrompt() {
       $('hint').textContent = (p.redo ? '↩ Try this one again with no slips.'
         : lastSlip ? 'Oops, a slip. That one will come back.'
           : c.job ? JOBS[c.job.t].hint
-          : inside ? (inside.m.game === 'run' ? 'Type it to get past!' : `Type to bring in the next thing for ${inside.m.who}.`)
+          : inside ? (inside.m.game === 'run' ? (inside.m.rival && !inside.g.lost ? `Type it to get past! Beat ${inside.m.rival[1]} to ${inside.m.goal} and win a 🛡️ shield.` : 'Type it to get past!') : `Type to bring in the next thing for ${inside.m.who}.`)
         : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
             : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
               : p.perfect ? 'Perfect run: one slip sends you back to the start.'
@@ -1082,12 +1196,15 @@ function updatePrompt() {
       : (m.game === 'maze' ? `Press Enter to start looking for ${m.goal}.` : m.game === 'run' ? `Press Enter to start running to ${m.goal}.` : `Press Enter to start fetching things for ${m.who}.`) + '  (Esc to go outside)';
   } else if (inside) {
     const sp = inside.near, all = inside.placed >= inside.m.items.length;
-    hint = !sp ? (all ? 'All done here! Press Enter to go back outside.' : 'Walk to the glowing spot with the arrow keys.')
+    const pk = inside.m.pick;
+    hint = !sp ? (all ? 'All done here! Press Enter to go back outside.'
+      : pk === 'memory' ? `Remember where each thing goes, then walk to a spot. Talk to ${inside.m.who} to see the plan again.`
+        : pk === 'color' ? 'Each book goes on the shelf tag of its own color. Walk to a tag with the arrow keys.' : 'Walk to the glowing spot with the arrow keys.')
       : sp.kind === 'npc' ? `Press Enter to talk to ${inside.m.who}.`
         : sp.kind === 'door' ? 'Press Enter to go back outside.'
           : inside.mask >> sp.i & 1 ? 'Press Enter to take a look.'
             : takenBy(sp.i) ? `${takenBy(sp.i).name || 'Someone'} is doing this one. Try the glowing spot.`
-              : 'Press Enter to bring something in here.';
+              : pk ? 'Press Enter to choose what goes here.' : 'Press Enter to bring something in here.';
   } else if (c.base === 'boss') hint = 'Press Enter to fight the Typo Monster!';
   else if (c.job) hint = `Press Enter to help. ${JOBS[c.job.t].hint}`;
   else if (c.base) hint = 'Press Enter to start building here.';
@@ -1103,7 +1220,7 @@ function updatePrompt() {
 function leftIn(c) {
   if (!engaged) return 0;
   if (c.job) return c.job.hp;
-  if (inside) return inside.m.game === 'maze' ? G.movesLeft(inside.g.mz, inside.g.cell) : 6 - inside.placed;
+  if (inside) return inside.m.game === 'maze' ? 0 : 6 - inside.placed; // a maze in the dark does not say how far it is
   if (c.base === 'boss') return st.boss ? st.boss.hp : 0;
   return c.zone >= 0 ? district(st.d).sites[c.zone].need - st.have[c.zone] : 0;
 }
@@ -1145,7 +1262,7 @@ function pressEnter() {
     const sp = inside.near;
     if (!sp) { if (inside.placed >= 6) leaveBuilding(); return; }
     if (sp.kind === 'door') leaveBuilding();
-    else if (sp.kind === 'npc') { inside.talk = 7; npc(inside.placed >= inside.m.items.length ? `m_${inside.m.id}_done` : `m_${inside.m.id}`); }
+    else if (sp.kind === 'npc') { inside.talk = 7; if (inside.m.pick === 'memory') inside.peek = 6; npc(inside.placed >= inside.m.items.length ? `m_${inside.m.id}_done` : `m_${inside.m.id}`); }
     else if (inside.mask >> sp.i & 1) { inside.wig = { i: sp.i, t: 0.6 }; beep(700 + sp.i * 80, 0.12, 'triangle', 0.07); }
   } else if (doorId) enterBuilding(doorId);
   else autoWalk();
@@ -1207,7 +1324,7 @@ function whereIs(insideId, fresh) {
 }
 /** The list under the 👷 button: everyone in this city and where they are. */
 function paintCrew(now) {
-  const el = $('crewPop'); el.innerHTML = '';
+  const el = $('crewList'); el.innerHTML = '';
   const row = (name, color, where) => {
     const r = document.createElement('div'); r.className = 'who';
     const dot = document.createElement('i'); dot.style.background = COLORS[color % COLORS.length];
@@ -1219,13 +1336,27 @@ function paintCrew(now) {
   for (const id of net.order) {
     if (id === net.selfId) continue;
     const o = others.get(id);
-    row(o?.name || 'someone new', o?.color | 0, whereIs(o?.in, !!o?.seen && now - o.at < 6000));
+    row(o?.name || 'someone new', o?.color | 0, o?.away ? 'away' : whereIs(o?.in, !!o?.seen && now - o.at < 6000));
   }
+}
+/** Under the list: this city's room code, or (for the host of a same-Wi-Fi city) a button to make one. */
+function paintCrewNet() {
+  const el = $('crewNet'); el.innerHTML = '';
+  const add = (tag, text, cls) => { const x = document.createElement(tag); x.textContent = text; if (cls) x.className = cls; el.appendChild(x); return x; };
+  if (roomCode) {
+    add('small', '🌍 Room code');
+    add('div', roomCode, 'code');
+    add('small', 'Friends anywhere can join: they pick "Room code" on the start screen and type these words.');
+  } else if (net.isHost && roomId) {
+    add('button', '🌍 Invite friends over the internet').onclick = () => {
+      if (confirm('Open this city to friends on other networks? The game makes a four-word room code and moves everyone here into that room. It takes a few seconds.')) openToInternet();
+    };
+  } else if (roomId) add('small', '🏠 A same-Wi-Fi city. The builder who opened it can invite friends over the internet from this list.');
 }
 function crewOpen(open) {
   $('crewPop').classList.toggle('hidden', !open);
   $('crew').setAttribute('aria-expanded', open);
-  if (open) paintCrew(performance.now());
+  if (open) { paintCrew(performance.now()); paintCrewNet(); }
 }
 let hudAt = 0;
 function updateHud(now) {
@@ -1273,7 +1404,7 @@ function frame(now) {
   let dx = inside ? 0 : (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0);
   let dy = inside ? 0 : (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
   if (inside) {
-    auto = null; inside.pop += dt; inside.talk = Math.max(0, inside.talk - dt);
+    auto = null; inside.pop += dt; inside.talk = Math.max(0, inside.talk - dt); inside.peek = Math.max(0, inside.peek - dt);
     if (inside.wig && (inside.wig.t -= dt) <= 0) inside.wig = null;
     const walk = roomWalk(), g = inside.g;
     // someone else in this building may have moved the work along
@@ -1293,14 +1424,27 @@ function frame(now) {
     if (ix) me.face = ix;
     inside.walk = !!(ix || iy);
     if (!walk && inside.m.game === 'maze' && g.path.length) { // walk the corridor to the next fork
-      const tx = g.path[0] % G.MW, ty = (g.path[0] / G.MW) | 0, ax = tx - g.px, ay = ty - g.py, L = Math.hypot(ax, ay), s = 5 * dt;
-      if (L <= s) { g.px = tx; g.py = ty; g.path.shift(); if (!g.path.length && g.cell === g.mz.goal && inside.placed < 6) { inside.mask = 63; inside.placed = 6; net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: roomKey(inside.id), all: true }); } }
+      const tx = g.path[0] % g.mz.w, ty = (g.path[0] / g.mz.w) | 0, ax = tx - g.px, ay = ty - g.py, L = Math.hypot(ax, ay), s = 5 * dt;
+      if (L <= s) {
+        const c = g.path.shift(); g.px = tx; g.py = ty;
+        if (c === g.mz.key && !g.hasKey) { g.hasKey = true; sfx.win(); toast('🗝️ You found the key! Now the locked door will open.', 'gold'); }
+        G.reveal(g, c);
+        if (!g.path.length && g.cell === g.mz.goal && inside.placed < 6) { inside.mask = 63; inside.placed = 6; net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: roomKey(inside.id), all: true }); }
+      }
       else { g.px += ax / L * s; g.py += ay / L * s; if (ax) me.face = ax > 0 ? 1 : -1; }
       inside.walk = true;
     } else if (!walk && inside.m.game === 'run') {
       const gap = G.runStop(inside.placed) - g.rx, s = 420 * dt;
       g.rx += Math.abs(gap) <= s ? gap : Math.sign(gap) * s;
       inside.walk = Math.abs(gap) > 1; me.face = 1;
+      // The one to beat runs only while there is something to type, at a pace set by this player's own speed.
+      const rival = inside.m.rival;
+      g.racing = !!rival && !g.lost && inside.placed < 6 && !!engaged && !!T.p;
+      if (g.racing) {
+        g.raced = true;
+        g.vx += 280 / (T.p.text.length / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.8) + 1.6) * dt;
+        if (g.vx >= G.runStop(6)) { g.vx = G.runStop(6) + 50; g.lost = true; toast(`${rival[0]} ${rival[1]} got there first! Keep going and finish the race.`); }
+      }
     }
   }
   if (auto && !dx && !dy) {
@@ -1343,6 +1487,7 @@ function frame(now) {
 
   const modal = document.querySelector('.screen:not(.hidden)');
   const zone = modal ? -1 : updatePrompt();
+  if (!modal && !busy() && (P.sinceDrill | 0) >= DRILL_EVERY) offerDrill();
   if (!modal) greet();
 
   for (let i = fx.length - 1; i >= 0; i--) {
@@ -1360,7 +1505,7 @@ function frame(now) {
     const colorOf = o => COLORS[o.color % COLORS.length];
     const drawMate = (o, x, y) => drawPlayer(ctx, { ...o, boat: false }, x, y, now / 1000);
     if (job || inside.m.game !== 'furnish') G.drawGame(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, g: inside.g, placed: inside.placed, pop: inside.pop, opts: CH.opts ? CH.opts.map(o => o.id) : [], job, out: inside.out, nearF: inside.nearF, x: inside.x, y: inside.y, drawMe, mates, drawMate, mask: inside.mask, want: inside.want, colorOf });
-    else drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe, mates, drawMate, mask: inside.mask, want: inside.want, last: inside.last, colorOf });
+    else drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe, mates, drawMate, mask: inside.mask, want: inside.want, last: inside.last, colorOf, perm: inside.perm, peek: inside.peek });
     updateHud(now);
     return;
   }
@@ -1376,9 +1521,13 @@ function frame(now) {
 // ---------- input ----------
 addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
-  if (mode === 'start' || mode === 'lobby' || (mode === 'game' && document.querySelector('.screen:not(.hidden)'))) return;
+  if (mode === 'start' || mode === 'lobby') return;
   const ch = charOf(e);
-  if (mode === 'place') { if (ch) { e.preventDefault(); typeChar(ch); } return; }
+  if (DR.on) { // tricky-key practice has the keyboard
+    if (e.key === 'Escape') { endDrill(false); e.preventDefault(); } else if (ch) { e.preventDefault(); typeChar(ch); }
+    return;
+  }
+  if (document.querySelector('.screen:not(.hidden)')) return;
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }
   if (e.key === 'Escape') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }
   if (e.key === 'Enter') { pressEnter(); e.preventDefault(); return; }
@@ -1438,6 +1587,13 @@ $('btnKeys').onclick = () => {
   $('keys').classList.remove('hidden');
 };
 $('partyGo').onclick = () => { $('party').classList.add('hidden'); $('partyGo').blur(); };
+$('partyStay').onclick = () => { // not ready for new keys yet: back to the level just finished, to be asked again later
+  P.step = Math.max(0, P.step - 1); P.credits = 0; P.fresh = 0;
+  if (P.day.promos > 0) P.day.promos--;
+  S.saveProfile(P); stopTyping();
+  $('party').classList.add('hidden'); $('partyStay').blur();
+  toast(`Staying on level ${P.step + 1}: ${S.stepName(P.step)}. You will be asked again after a few more good lessons.`);
+};
 // Volume: the speaker button opens a slider under it; all the way down is mute.
 // The grown-ups panel has the same slider, and the two stay in step.
 function showVol() {
@@ -1469,11 +1625,8 @@ $('aDebug').onclick = () => {
   const out = $('aDebugOut'); out.value = debugInfo(); out.classList.remove('hidden'); out.select();
   navigator.clipboard?.writeText(out.value).then(() => toast('Debug info copied.'), () => {});
 };
-$('aJoin').onclick = () => { try { localStorage.setItem('qq.crew', $('aRoom').value.trim()); } catch { /* ignore */ } location.hash = ''; location.reload(); };
-$('aMake').onclick = () => { // four random words: easy to read out over the phone, hard to guess
-  const ws = DATA.words.flat().filter(w => w.length >= 4 && w.length <= 6), r = crypto.getRandomValues(new Uint32Array(4));
-  $('aRoom').value = [...r].map(n => ws[n % ws.length]).join(' ');
-};
+$('aJoin').onclick = () => { setCrew($('aRoom').value.trim()); dropHashRoom(); reloadInPlace(); };
+$('aMake').onclick = () => { $('aRoom').value = makeCode(); };
 $('aRestart').onclick = () => {
   const n = net.order.length;
   if (!confirm(n > 1 ? `Start the whole city over? Everything built will be erased. All ${n} builders here have to agree.` : 'Start the whole city over? Everything built will be erased.')) return;

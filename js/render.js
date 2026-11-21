@@ -156,6 +156,12 @@ function drawZone(ctx, x, y, on, t) {
 
 /** One builder. p: {x,y,walk,stumble,prog,face,name,color,hat,tool,pet,ride,rank,me} */
 export function drawPlayer(ctx, p, x, y, t) {
+  if (p.away) { // their tab is in the background: grey and faded until they come back
+    ctx.save(); ctx.globalAlpha = 0.5; if ('filter' in ctx) ctx.filter = 'grayscale(1)';
+    drawPlayer(ctx, { ...p, away: false, awayTag: true, walk: false, prog: 0, stumble: 0 }, x, y, t);
+    ctx.restore();
+    return;
+  }
   const bob = p.walk ? Math.abs(Math.sin(t * 12 + x * 0.01)) * 5 : 0;
   const wob = p.stumble > 0 ? Math.sin(p.stumble * 40) * 0.35 * Math.min(1, p.stumble * 3) : 0;
   ctx.fillStyle = '#0003';
@@ -170,7 +176,7 @@ export function drawPlayer(ctx, p, x, y, t) {
   const step = p.walk ? Math.sin(t * 14) * 4 : 0;
   ctx.fillRect(-9, -12, 7, 12 + step * 0.5); ctx.fillRect(2, -12, 7, 12 - step * 0.5);
   // body
-  ctx.fillStyle = COLORS[p.color % COLORS.length];
+  ctx.fillStyle = p.awayTag ? '#9a98a3' : COLORS[p.color % COLORS.length];
   rr(ctx, -14, -38, 28, 28, 9); ctx.fill();
   ctx.strokeStyle = '#0003'; ctx.lineWidth = 2; ctx.stroke();
   // head
@@ -195,7 +201,7 @@ export function drawPlayer(ctx, p, x, y, t) {
   ctx.restore();
   if (p.stumble > 0) emoji(ctx, '💫', x + 16, y - 74, 16);
   ctx.font = '700 13px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  const label = `${['🔰', '🧱', '📐', '🏛️'][p.rank | 0]} ${p.name || 'builder'}`;
+  const label = `${['🔰', '🧱', '📐', '🏛️'][p.rank | 0]} ${p.name || 'builder'}` + (p.awayTag ? ' (away)' : '');
   const tw = ctx.measureText(label).width + 12;
   ctx.fillStyle = p.me ? '#2b2340' : '#2b2340aa'; rr(ctx, x - tw / 2, y + 8, tw, 18, 9); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.fillText(label, x, y + 18);

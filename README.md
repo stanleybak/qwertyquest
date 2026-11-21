@@ -9,8 +9,10 @@ There is no build step and no backend.
 
 - **Multiplayer.** Peer to peer over WebRTC ([Trystero](https://github.com/dmotz/trystero),
   vendored in `vendor/`). Players on the same public IPv4 address join the same
-  city automatically. Add `#room=word` to the URL to share a city across
-  networks. One peer hosts the rules; if it leaves, the next peer takes over.
+  city automatically. To play across networks, pick "Room code" on the start
+  screen and type a shared code, or have the host of a running city press
+  "Invite friends over the internet" under the 👷 button: that makes a
+  four-word code and moves the whole city into its room. One peer hosts the rules; if it leaves, the next peer takes over.
 - **Saving.** Player progress and the city are kept in the browser's
   localStorage. When players meet, the most advanced saved city wins.
 - **Content.** `tools/build_content.py` holds the word and sentence lists,

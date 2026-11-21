@@ -1,17 +1,22 @@
 // What is inside each finished building: a neighbor who needs help, and six
 // things to put in the room. Each typed prompt places one thing.
 
-// game: furnish (walk to each spot), order (fetch things in the order on the list),
+// game: furnish (walk to each spot and choose what goes there), order (fetch things in the order on the list),
 // maze (pick a way at each fork), run (get past six things in a hallway).
-const M = (id, who, face, title, ask, thanks, items, wall, floor, game = 'furnish', goal = '') => ({ id, who, face, title, ask, thanks, items, wall, floor, game, goal });
+// more: { pick } for a furnish room where the right thing must be chosen for each spot
+//   ('memory': the plan is shown, then hidden; 'color': each spot has a color tag to match),
+//   { rival: [emoji, name] } for a run that is a race.
+const M = (id, who, face, title, ask, thanks, items, wall, floor, game = 'furnish', goal = '', more = {}) => ({ id, who, face, title, ask, thanks, items, wall, floor, game, goal, ...more });
+/** Shelf tag colors for a 'color' room, one per item. */
+export const TAGS = ['#e5484d', '#2fae66', '#2f7de1', '#ff8a3d', '#f2c200', '#6b6b76'];
 
 // Grouped as homes, shops, halls and landmarks. Lines match tools/build_voices.py.
 export const MISSIONS = [
   [
     M('grandma', 'Grandma Rose', '👵', 'Grandma\'s house', 'Hello, dear. My new house is so empty. Will you help me bring in the furniture?',
-      'Oh, it\'s lovely. It feels like home. Thank you, dear.', ['🛋️', '🛏️', '🪴', '🖼️', '🕰️', '🫖'], '#f6d6c9', '#c99a6b'),
+      'Oh, it\'s lovely. It feels like home. Thank you, dear.', ['🛋️', '🛏️', '🪴', '🖼️', '🕰️', '🫖'], '#f6d6c9', '#c99a6b', 'furnish', '', { pick: 'memory' }),
     M('roomkid', 'Pip', '🧒', 'Pip\'s room', 'This is my new room! I made an obstacle course. Race to the flag, and get past all my toys!',
-      'You made it! Best race ever! You\'re awesome!', ['⚽', '🧸', '🎮', '📚', '🪁', '🚀'], '#cfe8ff', '#8fb2d9', 'run', '🏁'),
+      'You made it! Best race ever! You\'re awesome!', ['⚽', '🧸', '🎮', '📚', '🪁', '🚀'], '#cfe8ff', '#8fb2d9', 'run', '🏁', { rival: ['🧒', 'Pip'] }),
   ],
   [
     M('baker', 'Baker Bo', '🧑‍🍳', 'The bakery', 'Welcome to my bakery! I have a big order to pack. Bring me the treats in the order on my list!',
@@ -21,7 +26,7 @@ export const MISSIONS = [
   ],
   [
     M('librarian', 'Mr. Quill', '🧑‍🏫', 'The library', 'Shh. Welcome to the library. Could you help me put the books on the shelves?',
-      'Wonderful. So many stories to read. Thank you.', ['📕', '📗', '📘', '📙', '📔', '🌍'], '#e6dcf5', '#a58fc7'),
+      'Wonderful. So many stories to read. Thank you.', ['📕', '📗', '📘', '📙', '📒', '📓'], '#e6dcf5', '#a58fc7', 'furnish', '', { pick: 'color' }),
     M('scientist', 'Dr. Fizz', '🧑‍🔬', 'The science lab', 'My big experiment is ready! Hand me the lab things in the order on my list!',
       'Eureka! It all works! Thank you, thank you!', ['🔬', '🧪', '🧲', '🔭', '⚗️', '💡'], '#d6f0f2', '#86b8bd', 'order'),
   ],
@@ -29,7 +34,7 @@ export const MISSIONS = [
     M('guide', 'Lady Marble', '🧑‍🎨', 'The museum', 'Welcome to the museum. Our crown is lost in the back halls. Can you find your way to it?',
       'Magnificent. The crown is back where it belongs!', ['🦕', '🏺', '🗿', '💎', '🖼️', '👑'], '#f2ead8', '#b9a47a', 'maze', '👑'),
     M('captain', 'Captain Tide', '🧑‍✈️', 'The boathouse', 'Ahoy! The boat is leaving! Run down the dock and hop over everything in your way, matey!',
-      'Shipshape! You made it aboard. Thank ye kindly!', ['📦', '🛢️', '🦀', '🪢', '🐟', '⚓'], '#d3e9f7', '#8a6a48', 'run', '⛵'),
+      'Shipshape! You made it aboard. Thank ye kindly!', ['📦', '🛢️', '🦀', '🪢', '🐟', '⚓'], '#d3e9f7', '#8a6a48', 'run', '⛵', { rival: ['🐦', 'Gull'] }),
   ],
 ];
 
@@ -73,6 +78,7 @@ export function nearSpot(room) {
 /**
  * Draw the inside of a building.
  * v: { w, h, ph (prompt panel height), t, m, placed, mask (which spots are filled), want (this player's spot),
+ *      perm (which item belongs at each spot), peek (seconds the plan stays visible),
  *      last (spot just filled), pop, x, y, near, talk, wig, drawMe(x, y), mates, drawMate(o, x, y), colorOf(o) }
  */
 export function drawInterior(ctx, v) {
@@ -114,12 +120,19 @@ export function drawInterior(ctx, v) {
   }
 
   const drawItem = s => {
-    const wall = s.i < 3, ix = fx(s.x), iy = wall ? y0 + H * 0.36 : fy(s.y) - 22;
+    const wall = s.i < 3, ix = fx(s.x), iy = wall ? y0 + H * 0.36 : fy(s.y) - 22, it = v.perm ? v.perm[s.i] : s.i;
+    if (!has(s.i) && m.pick === 'color') { // a shelf tag: the thing of this color goes here
+      ctx.fillStyle = TAGS[it]; ctx.beginPath(); ctx.roundRect(ix - 20, iy - 24, 40, 48, 8); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+    } else if (!has(s.i) && m.pick === 'memory' && v.peek > 0) { // the plan, fading
+      ctx.globalAlpha = Math.min(0.6, v.peek * 0.6); emoji(ctx, m.items[it], ix, iy, 48); ctx.globalAlpha = 1;
+      return;
+    }
     if (has(s.i)) {
       const grow = s.i === v.last ? Math.min(1, v.pop * 4) : 1;
       const wig = v.wig && v.wig.i === s.i ? Math.sin(v.wig.t * 30) * 8 * v.wig.t : 0;
-      emoji(ctx, m.items[s.i], ix + wig, iy - (1 - grow) * 30, 56 * (0.4 + 0.6 * grow));
-    } else if (wall) { ctx.fillStyle = '#0002'; ctx.font = '800 26px system-ui'; ctx.textAlign = 'center'; ctx.fillText('?', ix, iy); }
+      emoji(ctx, m.items[it], ix + wig, iy - (1 - grow) * 30, 56 * (0.4 + 0.6 * grow));
+    } else if (wall && m.pick !== 'color') { ctx.fillStyle = '#0002'; ctx.font = '800 26px system-ui'; ctx.textAlign = 'center'; ctx.fillText('?', ix, iy); }
   };
   spots.filter(s => s.kind === 'item' && s.i < 3).forEach(drawItem);
 

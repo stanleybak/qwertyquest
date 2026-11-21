@@ -25,21 +25,21 @@
     <div id="powers" class="chip" title="Shield: forgives a slip. Crane: double loads. Fire: clean streak."></div>
     <span id="crewWrap">
       <button id="crew" class="chip" title="Who is here" aria-haspopup="true" aria-expanded="false"></button>
-      <div id="crewPop" class="hidden"></div>
+      <div id="crewPop" class="hidden"><div id="crewList"></div><div id="crewNet"></div></div>
     </span>
     <button id="btnWear" title="Wardrobe">🎒</button>
     <span id="soundWrap">
       <button id="btnSound" title="Volume" aria-haspopup="true" aria-expanded="false">🔊</button>
       <div id="volPop" class="hidden"><input id="volQuick" type="range" min="0" max="1" step="0.05" aria-label="Volume"><span id="volPct"></span></div>
     </span>
-    <button id="btnKeys" title="Keyboard layout and warm-up">⌨️</button>
+    <button id="btnKeys" title="Keyboard layout and level">⌨️</button>
     <button id="btnAdult" title="Grown-ups">⚙️</button>
   </div>
 </div>
 
 <div id="toasts"></div>
 <div id="vote" class="ask hidden"></div>
-<div id="update" class="ask hidden"><span id="updateMsg">✨ A new version is ready.</span><br><button id="updateGo" class="yes">🔄 Update now</button></div>
+<div id="update" class="ask hidden"><span id="updateMsg">✨ A new version is ready.</span><br><button id="updateGo" class="yes">🔄 Update</button></div>
 
 <div id="panel" class="hidden">
   <div id="dots" title="What is left in this challenge"></div>
@@ -58,6 +58,12 @@
     <div id="colors"></div>
     <label>Keyboard</label>
     <div id="layouts" class="seg"></div>
+    <label>Play with</label>
+    <div id="nets" class="seg"><button id="netLan" type="button">🏠 My Wi-Fi</button><button id="netCode" type="button">🌍 Room code</button></div>
+    <div id="codeBox" class="hidden">
+      <input id="code" maxlength="40" autocomplete="off" spellcheck="false" placeholder="type the room code" aria-label="Room code">
+      <p class="small">Starting a new room? Make up a code and tell your friends, or <button id="codeMake" class="link" type="button">get four random words</button>.</p>
+    </div>
     <button id="go" class="primary">Start building ▶</button>
     <p id="netnote" class="small">Everyone on your Wi-Fi builds the same city.</p>
   </div>
@@ -69,13 +75,29 @@
 
 <div id="place" class="screen hidden">
   <div class="card wide">
-    <h2>Warm-up!</h2>
-    <p class="sub">Type what you see. This finds the right level for you. A few mistakes are fine!</p>
-    <div class="meter"><div id="placebar"></div></div>
-    <div id="pfound" class="hidden"></div>
-    <div id="pprompt"></div>
-    <div id="pkb"></div>
-    <button id="skip">🌱 I'm new to typing: start at level 1</button>
+    <h2>Choose your level</h2>
+    <p class="sub">New to typing? Start at level 1. You move up as you get better, and you can change it any time.</p>
+    <div id="levels"></div>
+    <button id="levelGo" class="primary">Play ▶</button>
+  </div>
+</div>
+
+<div id="drill" class="screen hidden">
+  <div class="card wide">
+    <h2>🎯 Tricky key practice</h2>
+    <div id="drillIntro">
+      <p id="drillSub" class="sub"></p>
+      <div id="drillKeys" class="caps"></div>
+      <button id="drillGo" class="primary">Start practice ▶</button>
+      <button id="drillSkip" class="link" type="button">Not now</button>
+    </div>
+    <div id="drillRun" class="hidden">
+      <p class="sub">Type what you see. Slow and right beats fast and wrong.  (Esc to stop)</p>
+      <div class="meter"><div id="drillBar"></div></div>
+      <div id="dfound" class="hidden"></div>
+      <div id="dprompt"></div>
+      <div id="dkb"></div>
+    </div>
   </div>
 </div>
 
@@ -94,7 +116,7 @@
     <label>Layout</label>
     <div id="kLayouts" class="seg"></div>
     <p class="small">Dvorak works on any keyboard: the game reads which key you press, not the letter printed on it. Follow the keyboard picture on screen. Each layout keeps its own level.</p>
-    <div class="rowbtn"><button id="kRetest">Redo the warm-up to find my level again</button></div>
+    <div class="rowbtn"><button id="kRetest">Choose my level again</button></div>
     <button id="kGo" class="primary">Done</button>
   </div>
 </div>
@@ -103,9 +125,10 @@
   <div class="card">
     <div class="stars">⭐⭐⭐</div>
     <h2 id="partyTitle"></h2>
-    <div id="partyKeys"></div>
+    <div id="partyKeys" class="caps"></div>
     <p id="partyNote" class="sub"></p>
     <button id="partyGo" class="primary">Keep going ▶</button>
+    <button id="partyStay" class="link hidden" type="button">Stay on this level for now</button>
   </div>
 </div>
 
@@ -123,7 +146,7 @@
     <div class="rowbtn">
       <button id="aJoin">Join room</button>
       <button id="aRestart" class="danger">Restart the city (everyone must agree)</button>
-      <button id="aRetest">Redo the warm-up</button>
+      <button id="aRetest">Choose level on the start screen</button>
       <button id="aReset" class="danger">Erase this player</button>
       <button id="aDebug">Copy debug info</button>
     </div>

@@ -44,17 +44,17 @@ button.link { background: none; box-shadow: none; text-decoration: underline; co
 @keyframes shake { 25% { transform: translateX(calc(-50% - 6px)); } 75% { transform: translateX(calc(-50% + 6px)); } }
 .card.shake { animation-name: shake2; }
 @keyframes shake2 { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
-#prompt, #pprompt { font-family: var(--mono); font-weight: 700; font-size: clamp(1.9rem, 4vw, 3rem); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-#prompt.spaced, #pprompt.spaced { font-size: clamp(3rem, 7vw, 4.4rem); }
-#prompt.spaced span, #pprompt.spaced span { margin: 0 .18em; }
-#prompt.long, #pprompt.long { font-size: clamp(1.25rem, 2.3vw, 1.6rem); font-weight: 500; text-align: left; }
+#prompt, #dprompt { font-family: var(--mono); font-weight: 700; font-size: clamp(1.9rem, 4vw, 3rem); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+#prompt.spaced, #dprompt.spaced { font-size: clamp(3rem, 7vw, 4.4rem); }
+#prompt.spaced span, #dprompt.spaced span { margin: 0 .18em; }
+#prompt.long, #dprompt.long { font-size: clamp(1.25rem, 2.3vw, 1.6rem); font-weight: 500; text-align: left; }
 .ch { border-radius: 6px; padding: 0 1px; color: #8a8298; }
 .ch.ok { color: var(--good); }
 .ch.cur { background: #ffe08a; color: var(--ink); box-shadow: 0 3px 0 var(--accent); }
 .ch.cur.sp { box-shadow: 0 3px 0 var(--accent), inset 0 -4px 0 #0002; }
 .ch.err { background: #ffc9c9; color: var(--bad); }
-#found, #pfound { font-family: var(--mono); font-size: 1.4rem; color: #6b6480; margin-bottom: 2px; }
-#found b, #pfound b { color: var(--bad); text-decoration: underline wavy; }
+#found, #dfound { font-family: var(--mono); font-size: 1.4rem; color: #6b6480; margin-bottom: 2px; }
+#found b, #dfound b { color: var(--bad); text-decoration: underline wavy; }
 #hint { font-size: 1.25rem; font-weight: 600; color: #4d4566; min-height: 1.3em; margin-top: 2px; }
 
 #kb { --kp: 42px; margin-top: 10px; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px; user-select: none; }
@@ -115,18 +115,30 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .seg button.sel { border-color: var(--accent); background: #fff1e3; }
 #party .stars { font-size: 3rem; animation: starpop .8s ease-out; }
 @keyframes starpop { 0% { transform: scale(.2) rotate(-20deg); opacity: 0; } 70% { transform: scale(1.25); } 100% { transform: scale(1); opacity: 1; } }
-#partyKeys { display: flex; gap: 22px; justify-content: center; margin: 12px 0; }
-#partyKeys .cap { width: 76px; height: 76px; border-radius: 16px; background: #ffe08a; box-shadow: 0 6px 0 var(--accent); font: 800 2.4rem var(--mono); display: grid; place-items: center; margin: 0 auto 10px; animation: starpop .8s ease-out; }
-#partyKeys small { color: #6b6480; font-weight: 700; }
+#partyKeys, .caps { display: flex; gap: 22px; justify-content: center; margin: 12px 0; }
+.caps .cap { width: 76px; height: 76px; border-radius: 16px; background: #ffe08a; box-shadow: 0 6px 0 var(--accent); font: 800 2.4rem var(--mono); display: grid; place-items: center; margin: 0 auto 10px; animation: starpop .8s ease-out; }
+.caps small { color: #6b6480; font-weight: 700; }
 .spark { position: fixed; z-index: 9; pointer-events: none; font-weight: 800; color: #ff8a3d; text-shadow: 0 2px 0 #fff; opacity: 0; animation: spark 1.3s ease-out forwards; }
 @keyframes spark { 0% { transform: translate(-50%, -50%) scale(.2); opacity: 1; } 70% { opacity: 1; } 100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1.15) rotate(140deg); opacity: 0; } }
 #vol { padding: 0; border: 0; margin-top: 6px; }
-#skip { margin-top: 16px; font-size: 1.2rem; font-weight: 800; padding: 14px 22px; background: #e3f6d8; }
-#pkb { min-height: 8px; }
+#dkb { min-height: 8px; }
+#levels { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 8px; max-height: 50vh; overflow: auto; padding: 4px; text-align: left; }
+#levels button { display: grid; grid-template-columns: 2.2em 1fr; align-items: center; gap: 0 8px; padding: 8px 12px; border: 2px solid #0002; font-size: 1.05rem; text-align: left; }
+#levels button b { grid-row: span 2; font-size: 1.5rem; text-align: center; color: var(--accent); }
+#levels button small { color: #6b6480; font-family: var(--mono); }
+#levels button.sel { border-color: var(--accent); background: #fff1e3; box-shadow: 0 0 0 2px var(--accent); }
+#codeBox .small { margin-top: 6px; }
+#codeBox button.link { margin: 0; padding: 0; font-size: 1rem; }
+#crewNet { border-top: 2px solid #0001; margin-top: 6px; padding: 10px 0 4px; max-width: 300px; white-space: normal; }
+#crewNet small { display: block; color: #6b6480; font-weight: 600; font-size: .95rem; }
+#crewNet .code { font: 800 1.35rem var(--mono); color: var(--ink); background: #fff1e3; border-radius: 10px; padding: 6px 10px; margin: 4px 0 6px; user-select: all; }
+#hud #crewNet button { width: 100%; height: auto; font-size: 1.05rem; font-weight: 800; padding: 10px 12px; border-radius: 12px; background: #e3f6d8; }
+#drillSkip, #partyStay { display: block; margin: 12px auto 0; font-size: 1.1rem; }
 .ask { background: var(--paper); border-radius: 18px; padding: 14px 16px; box-shadow: 0 6px 18px #0005; font-size: 1.25rem; font-weight: 800; animation: pop .25s ease-out; }
 .ask button { margin: 10px 8px 0 0; font-size: 1.15rem; font-weight: 800; }
 .ask button.yes { background: var(--good); color: #fff; }
-#update { position: fixed; left: 12px; top: 72px; z-index: 6; }
+#update { position: fixed; left: 12px; top: 72px; z-index: 12; } /* above every screen: it shows on the start screen too */
+#update button.yes { font-size: 1.35rem; padding: 12px 22px; box-shadow: 0 3px 0 #1d7a45; }
 #kb .k.rh { margin-left: calc(var(--kp) * 0.4); } /* a small gap between the two hands */
 #crewWrap { position: relative; display: inline-flex; }
 #hud #crew { width: auto; height: auto; padding: 9px 16px; font-size: 1.2rem; border-radius: 999px; pointer-events: auto; }

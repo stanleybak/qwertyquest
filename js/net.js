@@ -147,7 +147,7 @@ export class Net {
       console.warn('network unavailable, playing solo', e);
       this.room = null; return;
     }
-    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'hold', 'vote', 'ask', 'welcome', 'deny']) {
+    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'hold', 'vote', 'move', 'ask', 'welcome', 'deny']) {
       const a = this.acts[kind] = this.room.makeAction(kind);
       a.onMessage((data, ctx) => this._recv(kind, data, ctx.userId));
     }

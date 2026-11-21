@@ -384,24 +384,25 @@ export function lessonPrompt(p) {
   return res;
 }
 
-// ---------- placement ----------
-// Probes climb the ladder. Passing a probe places the player past it.
-// The first probes are gentle: one key at a time, then short home-row drills.
-export const PROBES = [
-  { step: 0, n: 8, cps: 0.25, place: 0, single: true },
-  { step: 2, n: 5, cps: 0.4, place: 3, drill: true },
-  { step: 4, n: 5, cps: 0.5, place: 5, drill: true },
-  { step: 4, n: 5, cps: 0.6, place: 5, word: true },
-  { step: 9, n: 4, cps: 0.8, place: 10 },
-  { step: 14, n: 4, cps: 1.0, place: NS },
-  { step: NS, n: 3, cps: 1.3, place: NS + 1 },
-  { step: NS + 1, n: 2, cps: 1.8, place: NS + 2 },
-  { step: NS + 2, n: 1, cps: 2.5, place: NS + 3 },
-];
-export function probePrompt(p, probe) {
-  const fake = { ...p, step: probe.step, keys: p.keys };
-  if (probe.single) return { text: pick(cumKeys(3).replace(/[^a-z]/g, '').split('')), spaced: true };
-  if (probe.drill) return { text: letters(fake, 3, false), spaced: true };
-  if (probe.word) return { text: pick(wordsUpTo(probe.step).filter(w => w.length >= 3)) };
-  return genPrompt(fake, probe.step < 5 ? 0 : 1, false);
+// ---------- tricky-key practice ----------
+const errRate = k => (k.e + 0.5) / (k.n + 3);
+const learned = p => (p.step < NS ? cumKeys(p.step).split('') : Object.keys(p.keys)).filter(c => c.length === 1 && c !== ' ');
+/** The keys this player slips on most: only keys with real, repeated mistakes. */
+export function troubleKeys(p, n = 3) {
+  return learned(p).map(c => [c, p.keys[keyId(c)]]).filter(([, k]) => k && k.e >= 1.5 && errRate(k) > 0.06)
+    .sort((a, b) => errRate(b[1]) - errRate(a[1])).slice(0, n).map(x => x[0]);
+}
+/**
+ * A short drill for the keys in `hard`: each one back and forth with a key the
+ * player finds easy, then doubled, then all the hard ones mixed together.
+ */
+export function drillSet(p, hard) {
+  let easy = learned(p).filter(c => !hard.includes(c) && p.keys[keyId(c)]?.n >= 5)
+    .sort((a, b) => errRate(p.keys[keyId(a)]) - errRate(p.keys[keyId(b)])).slice(0, 4);
+  if (!easy.length) easy = STAGES[0].keys.split('').filter(c => !hard.includes(c));
+  if (!easy.length) easy = [hard[0]];
+  const out = [];
+  for (const h of hard) { const e = pick(easy); out.push([h, e, h, e, h], [h, h, e, h, h]); }
+  for (let i = 0; i < 3; i++) out.push(Array.from({ length: 5 }, (_, k) => (k === 2 ? pick(easy) : hard[(i + k) % hard.length])));
+  return out.map(a => ({ text: a.join(''), spaced: true }));
 }

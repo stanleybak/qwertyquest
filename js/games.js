@@ -1,5 +1,5 @@
-// The little games inside buildings: a maze, a hallway run, fetching things in
-// order, and putting out fires or fixing leaks. This file holds their rules
+// The little games inside buildings: a maze found in the dark, a hallway race,
+// fetching things in order, and putting out fires or fixing leaks. This file holds their rules
 // and drawing; main.js feeds them the typing.
 import { emoji } from './missions.js';
 
@@ -14,51 +14,90 @@ function rng(seed) {
 const seedOf = id => { let h = 2166136261; for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h; };
 
 // ---------- maze ----------
-export const MW = 8, MH = 5;
 const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // up, right, down, left
 export const ARROWS = ['⬆️', '➡️', '⬇️', '⬅️'];
-const step = (c, d) => c + DIRS[d][0] + DIRS[d][1] * MW;
+const step = (mz, c, d) => c + DIRS[d][0] + DIRS[d][1] * mz.w;
+/** Mazes grow as the city does: the building id starts with its neighborhood's number. */
+export const mazeSize = id => { const di = parseInt(id) || 0; return { w: Math.min(14, 10 + di), h: Math.min(9, 6 + (di >> 1)) }; };
 
-/** A maze with one route between any two cells. Same on every visit to the same building. */
+/**
+ * A maze with one route between any two cells. Same on every visit to the same
+ * building. Some have a locked door on the way to the goal, and a key hidden
+ * in a dead end on the near side of it.
+ */
 export function makeMaze(id) {
-  const r = rng(seedOf(id)), open = new Uint8Array(MW * MH), seen = new Uint8Array(MW * MH);
+  const { w, h } = mazeSize(id), N = w * h;
+  const r = rng(seedOf(id)), open = new Uint8Array(N), seen = new Uint8Array(N);
+  const mz = { w, h, open, goal: 0, key: -1, door: -1 };
   const stack = [0]; seen[0] = 1;
   while (stack.length) {
-    const c = stack[stack.length - 1], x = c % MW, y = (c / MW) | 0;
+    const c = stack[stack.length - 1], x = c % w, y = (c / w) | 0;
     const opts = [];
     DIRS.forEach(([dx, dy], d) => {
       const nx = x + dx, ny = y + dy;
-      if (nx >= 0 && ny >= 0 && nx < MW && ny < MH && !seen[ny * MW + nx]) opts.push(d);
+      if (nx >= 0 && ny >= 0 && nx < w && ny < h && !seen[ny * w + nx]) opts.push(d);
     });
     if (!opts.length) { stack.pop(); continue; }
-    const d = opts[(r() * opts.length) | 0], n = step(c, d);
+    const d = opts[(r() * opts.length) | 0], n = step(mz, c, d);
     open[c] |= 1 << d; open[n] |= 1 << ((d + 2) % 4); seen[n] = 1; stack.push(n);
   }
-  const mz = { open, goal: 0 };
   // the goal is the spot that takes the most choices to reach
-  let far = -1;
-  for (let c = 1; c < MW * MH; c++) {
+  let far = -1, best = 0;
+  for (let c = 1; c < N; c++) {
     if (exits(mz, c).length !== 1) continue;
     mz.goal = c; const n = movesLeft(mz, 0);
-    if (n > far) { far = n; mz.best = c; }
+    if (n > far) { far = n; best = c; }
   }
-  mz.goal = mz.best;
+  mz.goal = best;
+  if (r() < 0.7) lockDoor(mz, r);
   return mz;
 }
+/** Every cell's parent on the way back to cell 0, skipping cell `wall`. */
+function treeFrom0(mz, wall = -1) {
+  const par = new Int16Array(mz.w * mz.h).fill(-2), q = [0]; par[0] = -1;
+  while (q.length) {
+    const a = q.shift();
+    for (const d of exits(mz, a)) { const b = step(mz, a, d); if (b !== wall && par[b] === -2) { par[b] = a; q.push(b); } }
+  }
+  return par;
+}
+function lockDoor(mz, r) {
+  const par = treeFrom0(mz), route = [];
+  for (let c = mz.goal; c > 0; c = par[c]) route.unshift(c); // the cells from the start to the goal, start left out
+  const onRoute = new Set(route);
+  // a door in the back half of the route, best in a plain corridor
+  let spots = route.slice(Math.floor(route.length * 0.4), -1);
+  const plain = spots.filter(c => exits(mz, c).length === 2);
+  if (plain.length) spots = plain;
+  for (let tries = 0; tries < 6 && spots.length; tries++) {
+    const door = spots.splice((r() * spots.length) | 0, 1)[0], near = treeFrom0(mz, door);
+    // the key goes in a dead end on the start's side of the door, as far off the route as can be
+    let key = -1, deep = 0;
+    for (let c = 1; c < mz.w * mz.h; c++) {
+      if (near[c] === -2 || onRoute.has(c) || exits(mz, c).length !== 1) continue;
+      let n = 0; for (let a = c; !onRoute.has(a) && a > 0; a = near[a]) n++;
+      if (n > deep) { deep = n; key = c; }
+    }
+    if (key >= 0) { mz.door = door; mz.key = key; return; }
+  }
+}
 export const exits = (mz, c) => [0, 1, 2, 3].filter(d => mz.open[c] & (1 << d));
-/** Cells walked when leaving `c` by exit `d`: on to the next fork, dead end, or the goal. */
-export function runFrom(mz, c, d) {
+/** Is the way out of `c` by exit `d` shut by the locked door? */
+export const locked = (mz, c, d, hasKey) => !hasKey && step(mz, c, d) === mz.door;
+/** Cells walked when leaving `c` by exit `d`: on to the next fork, dead end, key, locked door, or the goal. */
+export function runFrom(mz, c, d, hasKey = true) {
   const path = [];
   for (;;) {
-    c = step(c, d); path.push(c);
-    if (c === mz.goal) break;
+    if (locked(mz, c, d, hasKey)) break;
+    c = step(mz, c, d); path.push(c);
+    if (c === mz.goal || (c === mz.key && !hasKey)) break;
     const outs = exits(mz, c).filter(k => k !== (d + 2) % 4);
     if (outs.length !== 1) break;
     d = outs[0];
   }
   return path;
 }
-/** Fewest choices from cell `c` to the goal. */
+/** Fewest choices from cell `c` to the goal, doors aside. */
 export function movesLeft(mz, c) {
   const dist = new Map([[c, 0]]), q = [c];
   while (q.length) {
@@ -70,6 +109,18 @@ export function movesLeft(mz, c) {
     }
   }
   return 0;
+}
+/** Light up what can be seen from cell `c`: the cell itself and two cells down each open corridor. */
+export function reveal(g, c) {
+  const mz = g.mz;
+  g.seen[c] = 1;
+  for (const d of exits(mz, c)) {
+    let a = c;
+    for (let k = 0; k < 2 && mz.open[a] & (1 << d); k++) {
+      a = step(mz, a, d); g.seen[a] = 1;
+      if (a === mz.door && !g.hasKey) break; // no seeing through a shut door
+    }
+  }
 }
 
 // ---------- hallway run ----------
@@ -87,10 +138,13 @@ export function orderSeq(id) {
 export function newGame(m, id, placed) {
   const g = { path: [] };
   if (m.game === 'maze') {
-    g.mz = makeMaze(id); g.cell = placed >= 6 ? g.mz.goal : 0;
-    g.px = g.cell % MW; g.py = (g.cell / MW) | 0;
-  } else if (m.game === 'run') g.rx = runStop(placed) - (placed ? 0 : 170);
+    const mz = g.mz = makeMaze(id); g.cell = placed >= 6 ? mz.goal : 0;
+    g.px = g.cell % mz.w; g.py = (g.cell / mz.w) | 0;
+    g.seen = new Uint8Array(mz.w * mz.h); g.hasKey = placed >= 6;
+    if (placed >= 6) g.seen.fill(1); else reveal(g, 0);
+  } else if (m.game === 'run') { g.rx = runStop(placed) - (placed ? 0 : 170); g.vx = g.rx; g.raced = false; g.lost = placed >= 6; }
   else if (m.game === 'order') { g.seq = orderSeq(id); g.labels = {}; }
+  else g.labels = {};
   return g;
 }
 
@@ -131,28 +185,37 @@ function room(ctx, F, m) {
 }
 
 function drawMaze(ctx, v, F) {
-  const { m, g, t } = v, pad = 16, gx = F.x0 + pad, gy = F.y0 + 42, gw = F.W - 2 * pad, gh = F.H - 42 - pad;
+  const { m, g, t } = v, mz = g.mz, MW = mz.w, MH = mz.h, pad = 16, gx = F.x0 + pad, gy = F.y0 + 42, gw = F.W - 2 * pad, gh = F.H - 42 - pad;
   const cw = gw / MW, ch = gh / MH;
   ctx.fillStyle = m.wall; ctx.beginPath(); ctx.roundRect(F.x0, F.y0, F.W, F.H, 18); ctx.fill();
-  ctx.fillStyle = m.floor; ctx.fillRect(gx, gy, gw, gh);
-  title(ctx, F, `${m.title.toUpperCase()}: find ${m.goal}`);
-  ctx.strokeStyle = '#3a2f55'; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath();
+  ctx.fillStyle = '#241d38'; ctx.fillRect(gx, gy, gw, gh); // the dark: not seen yet
+  const sees = c => g.seen[c] || v.mates.some(o => Math.round(o.ix / 100) + Math.round(o.iy / 100) * MW === c); // friends carry a light too
+  ctx.fillStyle = m.floor;
+  for (let c = 0; c < MW * MH; c++) if (sees(c)) ctx.fillRect(gx + (c % MW) * cw - 0.5, gy + ((c / MW) | 0) * ch - 0.5, cw + 1, ch + 1);
+  const doorSeen = mz.door >= 0 && g.seen[mz.door];
+  title(ctx, F, `${m.title.toUpperCase()}: find ${m.goal}` + (g.hasKey && mz.door >= 0 && v.placed < 6 ? '   🗝️ you have the key' : doorSeen && !g.hasKey ? '   🔒 find the 🗝️ key' : ''));
+  ctx.strokeStyle = '#3a2f55'; ctx.lineWidth = MW > 11 ? 4 : 6; ctx.lineCap = 'round'; ctx.beginPath();
   for (let c = 0; c < MW * MH; c++) {
-    const x = gx + (c % MW) * cw, y = gy + ((c / MW) | 0) * ch, o = g.mz.open[c];
+    if (!sees(c)) continue;
+    const x = gx + (c % MW) * cw, y = gy + ((c / MW) | 0) * ch, o = mz.open[c];
     if (!(o & 1)) { ctx.moveTo(x, y); ctx.lineTo(x + cw, y); }
     if (!(o & 2)) { ctx.moveTo(x + cw, y); ctx.lineTo(x + cw, y + ch); }
     if (!(o & 4)) { ctx.moveTo(x, y + ch); ctx.lineTo(x + cw, y + ch); }
     if (!(o & 8)) { ctx.moveTo(x, y); ctx.lineTo(x, y + ch); }
   }
   ctx.stroke();
-  const cx = c => gx + (c + 0.5) * cw, cy = c => gy + (c + 0.5) * ch;
-  const gl = g.mz.goal, found = v.placed >= 6;
-  emoji(ctx, m.goal, cx(gl % MW) + (found ? 26 : 0), cy((gl / MW) | 0) + Math.sin(t * 4) * 3, Math.min(44, ch * 0.55));
+  const cx = c => gx + (c + 0.5) * cw, cy = c => gy + (c + 0.5) * ch, big = Math.min(44, ch * 0.6, cw * 0.6);
+  const at = (e, c, size, dy = 0) => emoji(ctx, e, cx(c % MW), cy((c / MW) | 0) + dy, size);
+  const gl = mz.goal, found = v.placed >= 6;
+  if (g.seen[gl]) emoji(ctx, m.goal, cx(gl % MW) + (found ? cw * 0.3 : 0), cy((gl / MW) | 0) + Math.sin(t * 4) * 3, big);
+  if (doorSeen && !g.hasKey) { at('🚪', mz.door, big); at('🔒', mz.door, big * 0.5, 2); }
+  if (mz.key >= 0 && g.seen[mz.key] && !g.hasKey) at('🗝️', mz.key, big * 0.8, Math.sin(t * 5) * 3);
   const X = cx(g.px), Y = cy(g.py);
-  for (const d of v.opts) emoji(ctx, ARROWS[d], X + DIRS[d][0] * cw * 0.4, Y + DIRS[d][1] * ch * 0.4, 20 + Math.sin(t * 6) * 2);
+  for (const d of v.opts) emoji(ctx, ARROWS[d], X + DIRS[d][0] * cw * 0.4, Y + DIRS[d][1] * ch * 0.4, Math.min(20, ch * 0.4) + Math.sin(t * 6) * 2);
   const s = Math.min(0.75, ch / 100);
   for (const o of v.mates) { ctx.save(); ctx.translate(cx(Math.min(MW - 1, Math.max(0, o.ix / 100))), cy(Math.min(MH - 1, Math.max(0, o.iy / 100))) + ch * 0.3); ctx.scale(s, s); v.drawMate(o, 0, 0); ctx.restore(); }
   ctx.save(); ctx.translate(X, Y + ch * 0.3); ctx.scale(s, s); v.drawMe(0, 0); ctx.restore();
+  if (g.hasKey && !found) emoji(ctx, '🗝️', X + cw * 0.28, Y - ch * 0.25, big * 0.45);
 }
 
 function drawRun(ctx, v, F) {
@@ -175,10 +238,17 @@ function drawRun(ctx, v, F) {
     ctx.globalAlpha = 1;
   }
   emoji(ctx, m.goal, sx(runX(6)), ground - 34 + Math.sin(t * 4) * 4, 68);
+  // the one to beat: it hops along its own lane, a little behind the track
+  if (m.rival) {
+    const rx = Math.max(F.x0 + 28, sx(g.vx)), ry = ground - 30 - Math.abs(Math.sin(t * 7)) * (g.racing ? 12 : 2);
+    ctx.fillStyle = '#0002'; ctx.beginPath(); ctx.ellipse(rx, ground - 4, 20, 5, 0, 0, 7); ctx.fill();
+    emoji(ctx, m.rival[0], rx, ry, 44);
+    ctx.font = '800 13px system-ui'; ctx.fillStyle = '#0008'; ctx.textAlign = 'center'; ctx.fillText(m.rival[1], rx, ry - 34);
+  }
   for (const o of v.mates) v.drawMate(o, sx(o.ix), ground + 10);
   v.drawMe(sx(g.rx), ground + 10 - lift);
   ctx.restore();
-  title(ctx, F, `${m.title.toUpperCase()}: get to ${m.goal}`);
+  title(ctx, F, `${m.title.toUpperCase()}: get to ${m.goal}` + (m.rival && !g.lost && v.placed < 6 ? ` before ${m.rival[1]}!` : ''));
 }
 
 function drawOrder(ctx, v, F) {
