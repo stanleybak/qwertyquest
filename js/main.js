@@ -1666,8 +1666,21 @@ document.querySelectorAll('#hud button').forEach(b => b.addEventListener('click'
 
 $('updateGo').onclick = reloadInPlace;
 initStart();
-// coming back from an update: skip the start screen and walk straight back in
+// Coming back from an update (or a move to another room): skip the start screen,
+// but ask for one click before walking back in. A browser only allows full
+// screen from a click or key press, and the reload dropped out of it.
 let resume = false;
 try { resume = !!sessionStorage.getItem('qq.resume'); sessionStorage.removeItem('qq.resume'); } catch { /* ignore */ }
-if (resume && P.name && P.placed) { $('start').classList.add('hidden'); startGame(); }
+if (resume && P.name && P.placed) {
+  $('start').classList.add('hidden');
+  const saved = loadWorlds(), id = P.pos?.w && saved[P.pos.w] ? P.pos.w : Object.keys(saved).sort((a, b) => saved[b].at - saved[a].at)[0];
+  const el = $('lobbyBody'); el.innerHTML = '';
+  const add = (tag, text, cls) => { const x = document.createElement(tag); x.textContent = text; if (cls) x.className = cls; el.appendChild(x); return x; };
+  add('h2', `🏙️ ${saved[id]?.name || 'Your city'}`);
+  add('p', 'All set. Join to carry on where you left off.', 'sub');
+  const join = add('button', 'Join ▶', 'primary');
+  join.onclick = () => { goFull(); startGame(); };
+  $('lobby').classList.remove('hidden');
+  join.focus();
+}
 window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, others, roomKeyOf, S, matesHere, get vote() { return st.vote; }, district, party }; // for debugging in the console
