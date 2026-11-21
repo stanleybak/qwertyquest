@@ -200,7 +200,7 @@ function updateKb(next) {
   const kb = $('kb');
   // The guide is a crutch, so it only appears when it helps: while keys are
   // new, after a slip, or when the player has been stuck on a key for a while.
-  const show = DR.on ? !!T.p : P.guide && mode === 'game' && (!!T.p || !!CH.opts)
+  const show = DR.on ? !!T.p && DR.slip : P.guide && mode === 'game' && (!!T.p || !!CH.opts)
     && (P.fresh > 0 || P.step < 5 || (P.layout === 'dvorak' && P.step < S.STAGES.length) || T.miss > 0 || performance.now() - Math.max(T.last, T.shown) > 4000);
   if (show === kbShown && next === kbNext) return;
   kbShown = show; kbNext = next;
@@ -221,7 +221,7 @@ function updateKb(next) {
 }
 
 // ---------- typing engine (shared by the game and the tricky-key practice) ----------
-const DR = { on: false, keys: [], list: [], i: 0, clean: 0 }; // tricky-key practice, see below
+const DR = { on: false, keys: [], list: [], i: 0, clean: 0, slip: false }; // tricky-key practice, see below
 /** Typing that counts: toward lessons, streaks and shields. Practice does not. */
 const live = () => mode === 'game' && !DR.on;
 const T = { shown: 0, errs: new Set(), p: null, pos: 0, clean: true, last: 0, t0: 0, hits: 0, miss: 0, els: null, onDone: null, key: null };
@@ -272,7 +272,7 @@ function typeChar(ch) {
     return;
   }
   S.recordKey(P, want, false, 0);
-  T.miss++; T.bad.add(T.pos); T.errs.add(want === ' ' ? 'space' : want.toLowerCase());
+  T.miss++; DR.slip = true; T.bad.add(T.pos); T.errs.add(want === ' ' ? 'space' : want.toLowerCase());
   sfx.bad();
   if (live()) {
     S.lessonKey(P, false);
@@ -596,6 +596,7 @@ function startDrill() {
 function nextDrill() {
   $('drillBar').style.width = DR.i / DR.list.length * 100 + '%';
   if (DR.i >= DR.list.length) return endDrill(true);
+  DR.slip = false; // the keyboard picture stays away until a key is missed
   setPrompt(DR.list[DR.i], drillEls(), () => { if (!T.miss) DR.clean++; DR.i++; nextDrill(); });
 }
 function endDrill(finished) {

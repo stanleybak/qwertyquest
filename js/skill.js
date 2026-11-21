@@ -394,7 +394,8 @@ export function troubleKeys(p, n = 3) {
 }
 /**
  * A short drill for the keys in `hard`: each one back and forth with a key the
- * player finds easy, then doubled, then all the hard ones mixed together.
+ * player finds easy, then doubled, then the hard ones mixed together, and last
+ * a few real words that lean on those keys, the longer the better.
  */
 export function drillSet(p, hard) {
   let easy = learned(p).filter(c => !hard.includes(c) && p.keys[keyId(c)]?.n >= 5)
@@ -403,6 +404,16 @@ export function drillSet(p, hard) {
   if (!easy.length) easy = [hard[0]];
   const out = [];
   for (const h of hard) { const e = pick(easy); out.push([h, e, h, e, h], [h, h, e, h, h]); }
-  for (let i = 0; i < 3; i++) out.push(Array.from({ length: 5 }, (_, k) => (k === 2 ? pick(easy) : hard[(i + k) % hard.length])));
-  return out.map(a => ({ text: a.join(''), spaced: true }));
+  out.push(Array.from({ length: 5 }, (_, k) => (k === 2 ? pick(easy) : hard[k % hard.length])));
+  const drills = out.map(a => ({ text: a.join(''), spaced: true }));
+  // words: the ones with the most tricky letters in them, each tricky key getting its turn
+  const uses = w => [...w].filter(c => hard.includes(c)).length;
+  const pool = wordsUpTo(p.step).filter(w => !w.includes(' ') && w.length >= 3 && uses(w))
+    .map(w => [w, uses(w) * 2 + w.length * 0.3 + Math.random() * 2]).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+  const words = [];
+  for (let i = 0; words.length < 5 && i < 5; i++) {
+    const w = pool.find(x => x.includes(hard[i % hard.length]) && !words.includes(x)) || pool.find(x => !words.includes(x));
+    if (w) words.push(w);
+  }
+  return [...drills, ...words.map(w => ({ text: w, say: w }))];
 }
