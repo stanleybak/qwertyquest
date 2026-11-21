@@ -509,7 +509,8 @@ function goFull() {
   try {
     const el = document.documentElement;
     if (document.fullscreenElement || !el.requestFullscreen) return;
-    el.requestFullscreen().catch(() => {}); // Esc is left alone: it is the browser's key for leaving full screen
+    navigator.keyboard?.unlock?.(); // Esc is left alone: it is the browser's key for leaving full screen
+    el.requestFullscreen().catch(() => {});
   } catch { /* stay in the window */ }
 }
 function initStart() {
@@ -541,6 +542,7 @@ function initStart() {
     const code = useCode ? $('code').value.trim() : '';
     if (useCode && !code) { $('code').focus(); return; }
     setCrew(code); dropHashRoom();
+    lookAhead(); // for a new player the search starts here, while they choose a level
     S.switchLayout(P, layout);
     buildKb();
     P.name = $('name').value.trim().slice(0, 12) || 'builder';
@@ -817,17 +819,35 @@ let bring = '', leaving = '';   // a city of this device's own whose progress go
 const rid = () => [...crypto.getRandomValues(new Uint8Array(9))].map(b => b.toString(36).padStart(2, '0')).join('');
 const openCities = () => [...net.worlds.values()].filter(w => net.peers.has(w.host));
 
+// The search starts while the player is still on the start screen (or looking at
+// the Join button after an update), so by the time they press it the city has
+// usually been found already.
+const roomWanted = () => new URLSearchParams(location.hash.slice(1)).get('room') || crewWord();
+let pre = null; // { code, net, room: a promise, joinedAt }: a connection opened ahead of time
+function lookAhead() {
+  const code = roomWanted();
+  if (pre?.code === code) return;
+  pre?.net.close();
+  const c = pre = { code, net: new Net(handlers), joinedAt: 0 };
+  c.room = (async () => {
+    const room = await findRoom(code, new URLSearchParams(location.hash.slice(1)).get('lan'));
+    await c.net.join(room.id, { password: code, lanOnly: room.lan });
+    c.joinedAt = performance.now();
+    return room;
+  })();
+}
+
 async function startGame() {
   mode = 'lobby';
   buildKb();
-  const q = new URLSearchParams(location.hash.slice(1)), code = q.get('room') || crewWord();
-  const room = await findRoom(code, q.get('lan'));
-  roomId = room.id; roomLabel = room.label; roomCode = code;
-  net = new Net(handlers);
+  lookAhead(); // unless one is already under way for this same room
+  const c = pre; pre = null;
+  net = c.net; roomCode = c.code;
   applyProfile(me, profileMsg());
   $('lobby').classList.remove('hidden');
   paintLobby();
-  await net.join(roomId, { password: code, lanOnly: room.lan });
+  const room = await c.room;
+  roomId = room.id; roomLabel = room.label;
   // a city saved by an older version becomes a named city
   const old = legacyWorld(roomId);
   if (old && !Object.keys(loadWorlds()).length) saveWorld({ id: rid(), key: rid(), name: `${P.name}'s city` }, old);
@@ -842,7 +862,7 @@ async function startGame() {
     if (open.length) { bring = saved[open[0].id] ? '' : ids[0] || ''; return joinCity(open[0]); }
     if (openCities().length) return; // the city here is updating: wait for it (see onWorlds)
     hostCity(ids[0]);
-  }, net.room ? 3500 : 0);
+  }, net.room ? Math.max(0, 3500 - (performance.now() - c.joinedAt)) : 0); // time for the city here to announce itself, counted from when the search began
 }
 function joinCity(w) {
   net.ask(w.host, loadWorlds()[w.id]?.key || '', w.name);
@@ -1600,6 +1620,11 @@ addEventListener('keydown', e => {
   if (e.key === 'Backspace') { e.preventDefault(); return; }
   if (ch) { e.preventDefault(); CH.opts ? typeChoice(ch) : typeChar(ch); }
 });
+// Esc leaves full screen. The browser does that by itself and normally never even
+// reports the key; if it does reach the page, full screen is still on, so end it here.
+addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+}, true);
 addEventListener('keyup', e => held.delete(e.key));
 addEventListener('blur', () => held.clear());
 
@@ -1723,4 +1748,5 @@ if (resume && P.name && P.placed) {
   $('lobby').classList.remove('hidden');
   join.focus();
 }
+if (P.name || resume) lookAhead(); // a returning player: start looking for the city right away
 window.__qq = { P, get inside() { return inside; }, get st() { return st; }, get net() { return net; }, me, T, CH, G, enter: id => enterBuilding(id), get engaged() { return engaged; }, get redo() { return redo; }, get host() { return host; }, others, roomKeyOf, S, matesHere, get vote() { return st.vote; }, district, party }; // for debugging in the console

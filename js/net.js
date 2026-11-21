@@ -160,7 +160,7 @@ export class Net {
       this.worlds.delete(userId);
       this._drop(userId);
     });
-    setInterval(() => {
+    this.timer = setInterval(() => {
       const now = performance.now();
       for (const [id, w] of this.worlds) if (now - w.at > 3000) this.worlds.delete(id); // that city stopped announcing itself
       // A host that closes its laptop does not say goodbye, and WebRTC can take
@@ -170,6 +170,13 @@ export class Net {
       if (this.world && this.asking && !this.worlds.has(this.asking.host) && now - this.heard > 6000) { this.cancelAsk(); this._elect(); }
       this.h.onWorlds();
     }, 1000);
+  }
+
+  /** Stop listening and leave the room: this connection is not going to be used. */
+  close() {
+    clearInterval(this.timer); this.cancelAsk();
+    try { this.room?.leave(); } catch { /* already gone */ }
+    this.room = null;
   }
 
   /** A member left this city (or went silent). */
