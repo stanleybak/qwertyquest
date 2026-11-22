@@ -295,7 +295,7 @@ const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || i
 function nextKey() {
   if (T.p) return T.p.text[T.pos];
   if (!CH.opts || !CH.buf) return null;
-  const live = CH.opts.filter(o => o.text.startsWith(CH.buf));
+  const live = CH.opts.filter(o => o.text && o.text.startsWith(CH.buf));
   return live.length === 1 ? live[0].text[CH.buf.length] : null;
 }
 function dealChoices() {
@@ -324,6 +324,7 @@ function dealChoices() {
   }
   const used = (pool || opts).map(o => g.labels[o.id]).filter(Boolean);
   for (const o of pool || opts) {
+    if (o.free) { o.text = ''; continue; } // a corridor already walked has no word: its arrow key is enough
     let t = g.labels[o.id];
     // labels must differ, and none may be the start of another
     for (let k = 0; !t && k < 300; k++) {
@@ -343,7 +344,7 @@ function dealChoices() {
   g.keep = null;
   T.errs = new Set(); T.miss = 0; T.shown = performance.now();
   $('panel').classList.remove('again');
-  $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + 'Which way? Type the word by an arrow.' + (opts.some(o => o.free) ? ' Green: you have been that way, so an arrow key works too.' : '')
+  $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + (opts.every(o => o.free) ? 'You have been every way from here. Press an arrow key to go.' : 'Which way? Type the word by an arrow.' + (opts.some(o => o.free) ? ' Green: you have been that way. Just press that arrow key.' : ''))
     : m.game === 'run' ? 'Which lane is clear? Type its word.' + (opts.some(o => o.long) ? ` A ⚡ lane takes longer to type, but it trips up ${m.rival ? m.rival[1] : 'the other runner'}.` : '')
     : m.fun === 'belt' ? (opts.some(o => o.id === inside.want) ? `Grab ${item} for ${m.who}! Start typing its word and the belt waits for you.` : `${item} is coming round. Get ready!`)
     : m.fun === 'boxes' ? `${m.who} wants ${item} from you. Which box is it in? Type a box's word to look inside.`
@@ -356,9 +357,10 @@ function paintChoices() {
   const el = $('prompt'); el.className = 'choices'; el.innerHTML = '';
   $('found').classList.add('hidden');
   for (const o of CH.opts) {
-    const live = o.text.startsWith(CH.buf);
+    const live = o.free ? !CH.buf : o.text.startsWith(CH.buf);
     const chip = document.createElement('div'); chip.className = 'opt' + (live ? '' : ' off') + (o.free ? ' free' : '');
     const ic = document.createElement('b'); ic.textContent = o.icon; chip.appendChild(ic);
+    if (o.free) { const k = document.createElement('small'); k.textContent = 'arrow key'; chip.appendChild(k); }
     [...o.text].forEach((c, i) => {
       const sp = document.createElement('span');
       sp.className = 'ch' + (c === ' ' ? ' sp' : '') + (live && i < CH.buf.length ? ' ok' : live && CH.buf && i === CH.buf.length ? ' cur' : '');
@@ -370,7 +372,8 @@ function paintChoices() {
 }
 function typeChoice(ch) {
   const now = performance.now(), next = CH.buf + ch;
-  const live = CH.opts.filter(o => o.text.startsWith(CH.buf));
+  const live = CH.opts.filter(o => o.text && o.text.startsWith(CH.buf)); // only choices that have a word
+  if (!live.length) return; // nothing here to type: every way out is an arrow key
   if (live.some(o => o.text.startsWith(next))) {
     if (!CH.buf) CH.t0 = now;
     S.recordKey(P, ch, true, CH.buf ? now - T.last : 0); S.lessonKey(P, true, CH.buf ? now - T.last : 0);
@@ -912,7 +915,14 @@ function paintLobby() {
 // ---------- the game ----------
 /** Save the player, including where they stand, so a reload puts them back. */
 function saveAll() {
-  if (mode === 'game' && net?.world) P.pos = { w: net.world.id, x: Math.round(me.x), y: Math.round(me.y), f: me.face };
+  if (mode === 'game' && net?.world) {
+    P.pos = { w: net.world.id, x: Math.round(me.x), y: Math.round(me.y), f: me.face };
+    if (inside && !inside.job) { // inside a building: come back to the same room, and to the same place in a maze
+      const g = inside.g, maze = inside.m.game === 'maze' && inside.placed < 6;
+      P.pos.in = inside.id;
+      if (maze) P.pos.mz = { c: g.cell, s: G.packSeen(g), w: G.packBits(g.walked) };
+    }
+  }
   S.saveProfile(P);
 }
 
@@ -961,6 +971,18 @@ function openToInternet() {
   setTimeout(() => moveTo(code), 700);
 }
 
+/** After a reload: back into the building this player was in, if it is still standing here. */
+function backInside(at) {
+  if (!at || at.w !== net.world.id || typeof at.in !== 'string') return;
+  const [i, k] = at.in.split(':').map(Number);
+  if (!Number.isInteger(i) || !(k >= 0 && k < 6) || i > st.d || (i === st.d && st.have[k] < district(i).sites[k].need)) return;
+  enterBuilding(`${i}:${k}`);
+  const g = inside.g, mz = at.mz;
+  if (inside.m.game !== 'maze' || inside.placed >= 6 || !mz || !(mz.c >= 0 && mz.c < g.seen.length)) return;
+  g.cell = mz.c | 0; g.px = g.cell % g.mz.w; g.py = (g.cell / g.mz.w) | 0;
+  g.hasKey = G.mergeSeen(g, mz.s); G.mergeBits(g.walked, mz.w);
+  g.walked[g.cell] = 1; G.reveal(g, g.cell);
+}
 function enterCity() {
   mode = 'game'; enteredAt = performance.now();
   $('lobby').classList.add('hidden');
@@ -975,6 +997,7 @@ function enterCity() {
   if (at && at.w === net.world.id && Number.isFinite(at.x) && Number.isFinite(at.y) && walkable(at.x, at.y, st.d)) { me.x = at.x; me.y = at.y; me.face = at.f < 0 ? -1 : 1; }
   else { me.x = D.cx + (Math.random() - 0.5) * 300; me.y = D.cy + 45; }
   cam.x = me.x; cam.y = me.y;
+  backInside(at);
   if (!roomId) toast('Could not reach the network. Playing solo for now.');
   else toast(`Welcome to ${net.world.name}!`, 'gold');
   let fresh = false;
@@ -1644,7 +1667,7 @@ addEventListener('keydown', e => {
   if (document.querySelector('.screen:not(.hidden)')) return;
   if (e.key.startsWith('Arrow') && inside && !inside.job && inside.m.game === 'maze') { // back along a corridor already walked: no typing needed
     const d = ['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].indexOf(e.key), o = CH.opts?.find(x => x.id === d);
-    if (o?.free && !CH.buf) { sfx.key(); mazeGo(d); } else if (o && !CH.buf) $('hint').textContent = 'That way is new: type its word to go there.  (Tab to stop)';
+    if (o?.free) { sfx.key(); mazeGo(d); } else if (o && !CH.buf) $('hint').textContent = 'That way is new: type its word to go there.  (Tab to stop)';
     e.preventDefault(); return;
   }
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }

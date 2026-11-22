@@ -123,15 +123,21 @@ export function movesLeft(mz, c) {
 /** The cell reached by one step from `c` through exit `d`. */
 export const stepTo = (mz, c, d) => step(mz, c, d);
 /** What this player has explored, as text to send to the others in the maze: 'k' or '-' for the key, then the seen cells in hex. */
-export function packSeen(g) {
-  let s = g.hasKey ? 'k' : '-';
-  for (let i = 0; i < g.seen.length; i += 4) s += ((g.seen[i] ? 1 : 0) | (g.seen[i + 1] ? 2 : 0) | (g.seen[i + 2] ? 4 : 0) | (g.seen[i + 3] ? 8 : 0)).toString(16);
+export function packSeen(g) { return (g.hasKey ? 'k' : '-') + packBits(g.seen); }
+/** A row of yes-or-no cells as hex text, and back again (adding to what is there). */
+export function packBits(a) {
+  let s = '';
+  for (let i = 0; i < a.length; i += 4) s += ((a[i] ? 1 : 0) | (a[i + 1] ? 2 : 0) | (a[i + 2] ? 4 : 0) | (a[i + 3] ? 8 : 0)).toString(16);
   return s;
+}
+export function mergeBits(a, s) {
+  if (typeof s !== 'string') return;
+  for (let i = 0; i < a.length; i++) if (parseInt(s[i >> 2], 16) >> (i & 3) & 1) a[i] = 1;
 }
 /** Add what a teammate has explored. Returns true if they have the key. */
 export function mergeSeen(g, s) {
   if (typeof s !== 'string' || !s) return false;
-  for (let i = 0; i < g.seen.length; i++) if (parseInt(s[1 + (i >> 2)], 16) >> (i & 3) & 1) g.seen[i] = 1;
+  mergeBits(g.seen, s.slice(1));
   return s[0] === 'k';
 }
 /** Light up what can be seen from cell `c`: the cell itself and two cells down each open corridor. */
