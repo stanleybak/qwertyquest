@@ -458,7 +458,7 @@ function finishRoom() {
   sfx.win(); npc(`m_${inside.m.id}_done`); inside.talk = 7;
   const g = inside.g, rival = inside.m.rival;
   if (rival && g.raced && !g.lost) { // won the race
-    g.lost = true;
+    g.lost = true; P.ease = Math.max(0, (P.ease || 0) - 0.1);
     const shield = P.shields < 3;
     if (shield) P.shields++; else P.crane += 3;
     setTimeout(() => toast(`🏆 You beat ${rival[1]}! You win a ${shield ? '🛡️ shield' : '🏗️ crane'}.`, 'gold'), 1200);
@@ -1555,8 +1555,9 @@ function frame(now) {
       if (g.racing && !g.rest) {
         g.raced = true;
         const len = Math.min(...CH.opts.filter(o => !o.long).map(o => o.text.length));
-        g.vx += 280 / (len / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.8) + 2.2) * dt;
-        if (g.vx >= G.runStop(6)) { g.vx = G.runStop(6) + 50; g.lost = true; toast(`${rival[0]} ${rival[1]} got there first! Keep going and finish the race.`); }
+        // P.ease slows the other runner down after each race it wins, and speeds it up a little after each one it loses.
+        g.vx += 280 / ((len / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.7) + 3) * (1 + (P.ease || 0))) * dt;
+        if (g.vx >= G.runStop(6)) { g.vx = G.runStop(6) + 50; g.lost = true; P.ease = Math.min(2, (P.ease || 0) + 0.3); toast(`${rival[0]} ${rival[1]} got there first! Keep going and finish the race. Next time will be a bit easier.`); }
       }
     }
   }
