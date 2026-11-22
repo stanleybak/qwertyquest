@@ -344,7 +344,7 @@ function dealChoices() {
   $('panel').classList.remove('again');
   $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + 'Which way? Type the word by an arrow.' + (opts.some(o => o.free) ? ' Green: you have been that way, so an arrow key works too.' : '')
     : m.game === 'run' ? 'Which lane is clear? Type its word.' + (opts.some(o => o.long) ? ` A ⚡ lane takes longer to type, but it trips up ${m.rival ? m.rival[1] : 'the other runner'}.` : '')
-    : m.fun === 'belt' ? (opts.some(o => o.id === inside.want) ? `Grab ${item} for ${m.who}: type its word before it rolls away!` : `${item} is coming round. Get ready!`)
+    : m.fun === 'belt' ? (opts.some(o => o.id === inside.want) ? `Grab ${item} for ${m.who}! Start typing its word and the belt waits for you.` : `${item} is coming round. Get ready!`)
     : m.fun === 'boxes' ? `${m.who} wants ${item} from you. Which box is it in? Type a box's word to look inside.`
     : m.pick === 'color' ? 'Which book matches the color of this shelf tag? Type its word.'
     : spot >= 0 ? 'What goes in this spot? Type its word.'
@@ -1505,10 +1505,11 @@ function frame(now) {
     if (inside.m.game === 'order' && !inside.job) {
       for (const k in g.open) g.open[k] = Math.max(0, g.open[k] - dt); // boxes close again after a look
       if (inside.m.fun === 'belt' && engaged) {
-        // The belt gives time to type a word at this player's own speed while their thing is in sight, and hurries otherwise.
+        // The belt gives time to spot a thing at this player's own speed while it is in sight, and hurries otherwise.
+        // It stands still from the first letter typed until the word is done: nothing rolls away mid-word.
         const left = [0, 1, 2, 3, 4, 5].filter(i => !(inside.mask >> i & 1)), vis = left.filter(i => G.beltX(g, i) >= 0);
-        const len = (g.labels[inside.want] || 'abcdefgh').length, cross = len / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.6) + 3.5;
-        g.belt += (vis.includes(inside.want) ? 3 / cross : 2.2) * dt;
+        const len = (g.labels[inside.want] || 'abcdefgh').length, cross = len / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.6) + 5;
+        if (!CH.buf) g.belt += (vis.includes(inside.want) ? 3 / cross : 2.2) * dt;
         const key = left.filter(i => G.beltX(g, i) >= 0).join();
         if (key !== g.vis) { g.vis = key; if (CH.opts) { g.keep = [CH.buf, CH.clean]; CH.opts = null; } } // deal again: something rolled in or out
       }
