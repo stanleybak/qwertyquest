@@ -43,7 +43,7 @@ export function makeMaze(id) {
     open[c] |= 1 << d; open[n] |= 1 << ((d + 2) % 4); seen[n] = 1; stack.push(n);
   }
   // knock a few more openings through, leaving the dead ends as they are
-  for (let made = 0, tries = 0; made < Math.round(N / 9) && tries < 400; tries++) {
+  for (let made = 0, tries = 0; made < Math.round(N / 20) && tries < 400; tries++) {
     const c = (r() * N) | 0, d = r() < 0.5 ? 1 : 2, x = c % w, y = (c / w) | 0;
     if ((d === 1 ? x === w - 1 : y === h - 1) || open[c] & (1 << d)) continue;
     const n = step(mz, c, d);
@@ -120,6 +120,20 @@ export function movesLeft(mz, c) {
   }
   return 0;
 }
+/** The cell reached by one step from `c` through exit `d`. */
+export const stepTo = (mz, c, d) => step(mz, c, d);
+/** What this player has explored, as text to send to the others in the maze: 'k' or '-' for the key, then the seen cells in hex. */
+export function packSeen(g) {
+  let s = g.hasKey ? 'k' : '-';
+  for (let i = 0; i < g.seen.length; i += 4) s += ((g.seen[i] ? 1 : 0) | (g.seen[i + 1] ? 2 : 0) | (g.seen[i + 2] ? 4 : 0) | (g.seen[i + 3] ? 8 : 0)).toString(16);
+  return s;
+}
+/** Add what a teammate has explored. Returns true if they have the key. */
+export function mergeSeen(g, s) {
+  if (typeof s !== 'string' || !s) return false;
+  for (let i = 0; i < g.seen.length; i++) if (parseInt(s[1 + (i >> 2)], 16) >> (i & 3) & 1) g.seen[i] = 1;
+  return s[0] === 'k';
+}
 /** Light up what can be seen from cell `c`: the cell itself and two cells down each open corridor. */
 export function reveal(g, c) {
   const mz = g.mz;
@@ -168,6 +182,7 @@ export function newGame(m, id, placed) {
     const mz = g.mz = makeMaze(id); g.cell = placed >= 6 ? mz.goal : 0;
     g.px = g.cell % mz.w; g.py = (g.cell / mz.w) | 0;
     g.seen = new Uint8Array(mz.w * mz.h); g.hasKey = placed >= 6;
+    g.walked = new Uint8Array(mz.w * mz.h); g.walked[0] = 1; // cells this player has stood in: those corridors need no typing again
     if (placed >= 6) g.seen.fill(1); else reveal(g, 0);
   } else if (m.game === 'run') { g.rx = runStop(placed) - (placed ? 0 : 170); g.vx = g.rx; g.raced = false; g.lost = placed >= 6; g.cols = runCols(id); g.lane = g.ly = 1; g.rest = 0; g.col = -1; g.labels = {}; }
   else if (m.game === 'order') {

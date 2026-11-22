@@ -304,7 +304,8 @@ function dealChoices() {
   let opts, shut = false, pool = null;
   if (m.game === 'maze') { // every way out, except through a door that is still locked
     const all = G.exits(g.mz, g.cell), ways = all.filter(d => !G.locked(g.mz, g.cell, d, g.hasKey));
-    g.labels = {}; shut = ways.length < all.length; opts = ways.map(d => ({ id: d, icon: G.ARROWS[d] }));
+    g.labels = {}; shut = ways.length < all.length;
+    opts = ways.map(d => ({ id: d, icon: G.ARROWS[d], free: !!g.walked[G.stepTo(g.mz, g.cell, d)] })); // free: a corridor already walked
   } else if (m.game === 'run') { // all three lanes at the next stop: the scene shows which are clear
     g.labels = {}; g.col = inside.placed;
     opts = g.cols[g.col].map((c, l) => ({ id: l, icon: G.LANE_ICONS[l] + (c === 2 ? '⚡' : ''), long: c === 2 }));
@@ -341,7 +342,7 @@ function dealChoices() {
   g.keep = null;
   T.errs = new Set(); T.miss = 0; T.shown = performance.now();
   $('panel').classList.remove('again');
-  $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + 'Which way? Type the word by an arrow.'
+  $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + 'Which way? Type the word by an arrow.' + (opts.some(o => o.free) ? ' Green: you have been that way, so an arrow key works too.' : '')
     : m.game === 'run' ? 'Which lane is clear? Type its word.' + (opts.some(o => o.long) ? ` A ⚡ lane takes longer to type, but it trips up ${m.rival ? m.rival[1] : 'the other runner'}.` : '')
     : m.fun === 'belt' ? (opts.some(o => o.id === inside.want) ? `Grab ${item} for ${m.who}: type its word before it rolls away!` : `${item} is coming round. Get ready!`)
     : m.fun === 'boxes' ? `${m.who} wants ${item} from you. Which box is it in? Type a box's word to look inside.`
@@ -355,7 +356,7 @@ function paintChoices() {
   $('found').classList.add('hidden');
   for (const o of CH.opts) {
     const live = o.text.startsWith(CH.buf);
-    const chip = document.createElement('div'); chip.className = 'opt' + (live ? '' : ' off');
+    const chip = document.createElement('div'); chip.className = 'opt' + (live ? '' : ' off') + (o.free ? ' free' : '');
     const ic = document.createElement('b'); ic.textContent = o.icon; chip.appendChild(ic);
     [...o.text].forEach((c, i) => {
       const sp = document.createElement('span');
@@ -431,7 +432,7 @@ function chose(o) {
   sfx.load();
   net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'maze' ? undefined : roomKey(inside.id), slot: spot >= 0 ? spot : m.game === 'run' ? undefined : o.id });
   CH.opts = null; $('prompt').innerHTML = '';
-  if (m.game === 'maze') { g.path = G.runFrom(g.mz, g.cell, o.id, g.hasKey); g.cell = g.path[g.path.length - 1]; }
+  if (m.game === 'maze') mazeGo(o.id);
   else if (m.game === 'run') {
     g.lane = o.id;
     if (g.cols[g.col][o.id] === 2 && m.rival && !g.lost) { g.rest = 3; g.vx = Math.max(G.runStop(0) - 170, g.vx - 150); toast(`⚡ Zap! ${m.rival[1]} tripped.`); }
@@ -444,6 +445,12 @@ function chose(o) {
     inside.mask |= 1 << o.id; inside.want = -1; inside.pop = 0;
   }
   tally({ text: o.text }, true, errs, 0);
+}
+/** Set off down a maze corridor, as far as the next fork. */
+function mazeGo(d) {
+  const g = inside.g;
+  CH.opts = null; CH.buf = ''; $('prompt').innerHTML = '';
+  g.path = G.runFrom(g.mz, g.cell, d, g.hasKey); g.cell = g.path[g.path.length - 1] ?? g.cell;
 }
 /** The neighbor's problem is solved, by this player or by someone else working in the same building. */
 function finishRoom() {
@@ -602,6 +609,10 @@ function offerDrill() {
     const w = document.createElement('div'); w.append(d, f); box.appendChild(w);
   }
   $('drillSub').textContent = `${DRILL_EVERY} more buildings are up! These are the keys that trip you up the most. A little practice makes them easy.`;
+  // what finishing it wins: something every time, and wardrobe gear that only practice can earn
+  const next = S.ITEMS.filter(i => i.drill && !i.ok(P)).sort((a, b) => a.drill - b.drill)[0], togo = next ? next.drill - P.drills : 0;
+  $('drillPrize').textContent = '🎁 Finish it to win a 🏗️ crane (3 double loads) and a 🛡️ shield'
+    + (next ? `, and ${togo === 1 ? 'this one unlocks' : `you are ${togo} practices away from`} ${next.e} ${next.name} for your wardrobe.` : '.');
   $('drillIntro').classList.remove('hidden'); $('drillRun').classList.add('hidden');
   $('drill').classList.remove('hidden');
   $('drillGo').focus();
@@ -635,8 +646,11 @@ function endDrill(finished) {
   if (finished) {
     const gift = P.shields < 3;
     if (gift) P.shields++;
+    P.crane += 3; P.drills++;
     const back = DR.list.length - DR.total;
-    toast('💪 Practice done!' + (back ? ` ${back} ${back === 1 ? 'line' : 'lines'} came back for another go.` : ' Not one slip!') + (gift ? ' You earned a 🛡️ shield.' : ''), 'gold'); sfx.win();
+    toast('💪 Practice done!' + (back ? ` ${back} ${back === 1 ? 'line' : 'lines'} came back for another go.` : ' Not one slip!') + ` You win a 🏗️ crane${gift ? ' and a 🛡️ shield' : ''}.`, 'gold'); sfx.win();
+    confetti(me.x, me.y - 60, 100);
+    for (const it of S.newUnlocks(P)) setTimeout(() => toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'), 1400);
   }
   S.saveProfile(P);
 }
@@ -747,6 +761,7 @@ const handlers = {
       const was = o.in, wasScene = o.scene;
       o.in = o.inside && typeof data[6] === 'string' ? data[6].slice(0, 12) : ''; o.tix = +data[7] || 0; o.tiy = +data[8] || 0;
       o.want = o.in && Number.isInteger(data[9]) ? data[9] : -1; o.scene = typeof data[10] === 'string' ? data[10].slice(0, 8) : '';
+      o.seenStr = o.scene === 'maze' && typeof data[11] === 'string' ? data[11].slice(0, 48) : ''; // what they have explored of a maze
       if (o.in !== was || o.scene !== wasScene) { o.ix = o.tix; o.iy = o.tiy; }
       if (!o.seen) { o.x = o.tx; o.y = o.ty; o.seen = true; }
       o.at = performance.now();
@@ -995,7 +1010,7 @@ function whereInside() {
 }
 function sendPos() {
   if (!net || !net.peers.size) return;
-  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0) | (document.hidden ? 16 : 0), me.face, me.act, ...(inside ? [...whereInside(), claim(), scene()] : [])];
+  const m = [Math.round(me.x), Math.round(me.y), Math.round(me.prog * 100), (me.walk ? 1 : 0) | (me.stumble > 0.4 ? 2 : 0) | (me.boat ? 4 : 0) | (inside ? 8 : 0) | (document.hidden ? 16 : 0), me.face, me.act, ...(inside ? [...whereInside(), claim(), scene(), scene() === 'maze' ? G.packSeen(inside.g) : ''] : [])];
   const k = m.join(), now = performance.now();
   if (now - lastMe > 8000) { lastMe = now; net.broadcast('me', profileMsg()); } // names reach anyone who missed the first hello
   if (k === lastPos && now - lastPosAt < 1000) return;
@@ -1503,10 +1518,15 @@ function frame(now) {
     inside.y = Math.min(1, Math.max(0, inside.y + iy * 1.3 * dt));
     if (ix) me.face = ix;
     inside.walk = !!(ix || iy);
+    if (inside.m.game === 'maze' && !inside.job && inside.placed < 6) { // everyone in the maze shares what they have found
+      for (const o of matesHere(now)) {
+        if (G.mergeSeen(g, o.seenStr) && !g.hasKey) { g.hasKey = true; sfx.win(); toast(`🗝️ ${o.name || 'A friend'} found the key! The locked door will open for you too.`, 'gold'); if (CH.opts) CH.opts = null; }
+      }
+    }
     if (!walk && inside.m.game === 'maze' && g.path.length) { // walk the corridor to the next fork
       const tx = g.path[0] % g.mz.w, ty = (g.path[0] / g.mz.w) | 0, ax = tx - g.px, ay = ty - g.py, L = Math.hypot(ax, ay), s = 5 * dt;
       if (L <= s) {
-        const c = g.path.shift(); g.px = tx; g.py = ty;
+        const c = g.path.shift(); g.px = tx; g.py = ty; g.walked[c] = 1;
         if (c === g.mz.key && !g.hasKey) { g.hasKey = true; sfx.win(); toast('🗝️ You found the key! Now the locked door will open.', 'gold'); }
         G.reveal(g, c);
         if (!g.path.length && g.cell === g.mz.goal && inside.placed < 6) { inside.mask = 63; inside.placed = 6; net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: roomKey(inside.id), all: true }); }
@@ -1612,6 +1632,11 @@ addEventListener('keydown', e => {
     return;
   }
   if (document.querySelector('.screen:not(.hidden)')) return;
+  if (e.key.startsWith('Arrow') && inside && !inside.job && inside.m.game === 'maze') { // back along a corridor already walked: no typing needed
+    const d = ['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].indexOf(e.key), o = CH.opts?.find(x => x.id === d);
+    if (o?.free && !CH.buf) { sfx.key(); mazeGo(d); } else if (o && !CH.buf) $('hint').textContent = 'That way is new: type its word to go there.  (Tab to stop)';
+    e.preventDefault(); return;
+  }
   if (e.key.startsWith('Arrow')) { held.add(e.key); auto = null; e.preventDefault(); return; }
   // Tab stops typing; Tab or Q goes back outside. Esc is not used: it belongs to the browser, for leaving full screen.
   if (e.key === 'Tab') { if (engaged) stopTyping(); else if (inside) leaveBuilding(); e.preventDefault(); return; }

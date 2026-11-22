@@ -109,6 +109,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #prompt.choices { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: center; font-size: clamp(1.5rem, 3vw, 2.2rem); }
 .opt { background: #fff; border: 2px solid #0002; border-radius: 14px; padding: 2px 14px 2px 8px; white-space: pre; }
 .opt.off { opacity: .35; }
+.opt.free { border-color: var(--good); background: #e9f8ee; }
 .opt b { font-family: system-ui; font-weight: 400; margin-right: 8px; }
 .seg { display: flex; gap: 8px; justify-content: center; margin: 4px 0 10px; }
 .seg button { padding: 12px 24px; font-size: 1.2rem; border-radius: 12px; border: 2px solid #0002; background: #fff; font-weight: 700; cursor: pointer; }
@@ -147,3 +148,4 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #crewPop .who i { width: 18px; height: 18px; border-radius: 50%; flex: none; }
 #crewPop .who small { color: #6b6480; font-weight: 600; font-size: 1rem; margin-left: auto; padding-left: 18px; }
 #vote { position: fixed; left: 12px; top: 160px; z-index: 6; max-width: 360px; }
+.prize { background: #fff1c9; border-radius: 14px; padding: 10px 14px; font-weight: 700; font-size: 1.1rem; margin: 6px 0 2px; }
