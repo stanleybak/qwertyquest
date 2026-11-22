@@ -149,3 +149,4 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #crewPop .who small { color: #6b6480; font-weight: 600; font-size: 1rem; margin-left: auto; padding-left: 18px; }
 #vote { position: fixed; left: 12px; top: 160px; z-index: 6; max-width: 360px; }
 .prize { background: #fff1c9; border-radius: 14px; padding: 10px 14px; font-weight: 700; font-size: 1.1rem; margin: 6px 0 2px; }
+#drillStars { font-size: 1.3rem; letter-spacing: 2px; min-height: 1.6em; margin-top: 6px; }

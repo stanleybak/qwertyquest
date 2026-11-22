@@ -389,6 +389,15 @@ export function lessonPrompt(p) {
 }
 
 // ---------- tricky-key practice ----------
+/** A second chance at a practice line that had a slip: the same idea, but shorter. */
+export function easierLine(p, line, hard) {
+  if (line.spaced) return { text: line.text.slice(0, 4), spaced: true, again: true };
+  const keys = hard.filter(c => line.text.includes(c));
+  const ws = wordsUpTo(p.step).filter(w => !w.includes(' ') && w.length >= 3 && w.length < line.text.length && keys.some(c => w.includes(c)))
+    .sort((a, b) => a.length - b.length).slice(0, 8);
+  const w = ws.length ? pick(ws) : line.text;
+  return { text: w, say: w, again: true };
+}
 const errRate = k => (k.e + 0.5) / (k.n + 3);
 const learned = p => (p.step < NS ? cumKeys(p.step).split('') : Object.keys(p.keys)).filter(c => c.length === 1 && c !== ' ');
 /** The keys this player slips on most: only keys with real, repeated mistakes. */

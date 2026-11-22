@@ -192,6 +192,11 @@ export function newGame(m, id, placed) {
     for (let i = 5; i > 0; i--) { const j = (r() * (i + 1)) | 0; [g.box[i], g.box[j]] = [g.box[j], g.box[i]]; }
     g.spot = []; g.box.forEach((it, p) => { g.spot[it] = p; });
     g.belt = 0; g.open = {}; g.vis = ''; g.keep = null;
+    // The lab's boxes are shown open, closed, and then shuffled: four swaps that end in the order above.
+    g.swaps = []; for (let k = 0; k < 4; k++) { const a = (r() * 6) | 0; g.swaps.push([a, (a + 1 + ((r() * 5) | 0)) % 6]); }
+    const at = g.box.slice(); for (const [a, b] of [...g.swaps].reverse()) [at[a], at[b]] = [at[b], at[a]];
+    g.start = []; at.forEach((it, p) => { g.start[it] = p; });
+    g.intro = placed >= 6 ? 99 : 0;
   }
   else g.labels = {};
   return g;
@@ -268,6 +273,23 @@ function drawMaze(ctx, v, F) {
 }
 
 export const LANE_ICONS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
+const BOX_SHOW = 3.5, BOX_SHUT = 0.8, BOX_SWAP = 1.1;
+/** How long the lab's show-and-shuffle takes. */
+export const boxIntroLen = g => BOX_SHOW + BOX_SHUT + g.swaps.length * BOX_SWAP;
+/** Where a thing's box is right now: its place on the shelf (between two places mid-swap) and how far it is lifted. */
+function boxNow(g, item) {
+  let p = g.start[item], lift = 0;
+  const t = g.intro - BOX_SHOW - BOX_SHUT;
+  g.swaps.forEach(([a, b], k) => {
+    const u = (t - k * BOX_SWAP) / (BOX_SWAP * 0.85);
+    if (u <= 0 || (p !== a && p !== b)) return;
+    const to = p === a ? b : a;
+    if (u >= 1) { p = to; return; }
+    lift = Math.sin(u * Math.PI) * (p === a ? 1 : -0.35); // one goes over, the other slips under
+    p += (to - p) * u * u * (3 - 2 * u);
+  });
+  return { p, lift };
+}
 /** How far along the belt a thing is, 0 to 1, or -1 while it is out of sight round the back. */
 export const beltX = (g, item) => { const u = (((g.belt + g.spot[item]) % 6) + 6) % 6; return u < 3 ? u / 3 : -1; };
 function drawRun(ctx, v, F) {
@@ -345,15 +367,16 @@ function drawOrder(ctx, v, F) {
     ctx.restore();
   } else {
     ctx.fillStyle = '#0003'; ctx.fillRect(x0, shelfY, sw, 8);
-    for (let p = 0; p < 6; p++) {
-      const i = m.fun === 'boxes' ? g.box[p] : p;
+    const ready = m.fun !== 'boxes' || g.intro >= boxIntroLen(g);
+    for (let i = 0; i < 6; i++) {
       if (v.mask >> i & 1) continue;
-      const hot = v.opts.includes(i), x = R.fx(0.36 + p * 0.105), y = shelfY - 26 - (hot ? Math.abs(Math.sin(t * 4 + p)) * 4 : 0);
-      if (m.fun !== 'boxes') { emoji(ctx, m.items[i], x, y, 46); continue; }
-      // a closed box, until it is opened for a look
-      if (g.open[i] > 0) { emoji(ctx, '📭', x, shelfY - 20, 30); emoji(ctx, m.items[i], x, shelfY - 52, 40); }
+      const hot = v.opts.includes(i);
+      if (m.fun !== 'boxes') { emoji(ctx, m.items[i], R.fx(0.36 + i * 0.105), shelfY - 26 - (hot ? Math.abs(Math.sin(t * 4 + i)) * 4 : 0), 46); continue; }
+      const b = boxNow(g, i), x = R.fx(0.36 + b.p * 0.105), y = shelfY - 26 - b.lift * 34 - (hot ? Math.abs(Math.sin(t * 4 + i)) * 4 : 0);
+      if (g.intro < BOX_SHOW) emoji(ctx, m.items[i], x, y, 44); // first, everything in plain sight
+      else if (g.open[i] > 0) { emoji(ctx, '📭', x, shelfY - 20, 30); emoji(ctx, m.items[i], x, shelfY - 52, 40); } // opened for a look
       else emoji(ctx, '📦', x, y, 44);
-      emoji(ctx, LANE_ICONS[p], x, shelfY + 22, 20);
+      if (ready) emoji(ctx, LANE_ICONS[g.spot[i]], x, shelfY + 22, 20);
     }
   }
   const nx = R.fx(0.1), ny = R.floorY + 6;

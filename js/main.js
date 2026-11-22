@@ -29,7 +29,7 @@ let inside = null;             // { id, m, placed, pop } while visiting a buildi
 let doorId = null, nagAt = 0;
 const redo = [];               // prompts typed with a slip; each comes back until it is typed clean
 let redoGap = 0, lastSlip = false, redoDeck = '';
-const CH = { opts: null, buf: '', clean: true }; // a choice of labelled things: type one label to pick it
+const CH = { opts: null, buf: '', clean: true, slips: 0 }; // a choice of labelled things: type one label to pick it
 let engaged = null;            // what the player chose to work on by pressing Enter, e.g. 's0:2', 'j5', 'boss'
 
 // ---------- sound ----------
@@ -335,8 +335,9 @@ function dealChoices() {
     used.push(o.text);
   }
   const item = m.items[inside.want];
+  if (m.fun === 'boxes' && g.intro < G.boxIntroLen(g)) { $('hint').textContent = 'Watch closely! Where does each thing end up?'; $('prompt').innerHTML = ''; return; } // still shuffling
   if (m.fun === 'belt' && !opts.length) { $('hint').textContent = `${item} is coming round. Get ready!  (Tab to stop)`; $('prompt').innerHTML = ''; return; } // nothing on the belt just now
-  CH.opts = opts; CH.buf = ''; CH.clean = true;
+  CH.opts = opts; CH.buf = ''; CH.clean = true; CH.slips = 0;
   // the belt moved while a word was half typed: carry on with it if it is still there
   if (g.keep && opts.some(o => o.text.startsWith(g.keep[0]))) [CH.buf, CH.clean] = g.keep;
   g.keep = null;
@@ -383,22 +384,19 @@ function typeChoice(ch) {
   S.lessonKey(P, false); T.miss++; sfx.bad(); me.stumble = 0.5;
   if (P.shields > 0 && CH.clean) { P.shields--; toast('🛡️ Your shield forgave that slip.'); }
   else { CH.clean = false; P.streak = 0; }
+  if (++CH.slips >= 2) { // two slips in one word: back to its first letter
+    CH.buf = ''; CH.slips = 0; CH.clean = true;
+    $('hint').textContent = 'Two slips: start that word again, nice and steady.  (Tab to stop)';
+  }
   paintChoices();
   const box = $('panel'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
 }
 function chose(o) {
   const g = inside.g, m = inside.m, clean = CH.clean, errs = T.errs;
   CH.buf = ''; CH.clean = true; T.errs = new Set();
-  if (!clean) { // same labels stay put until one is typed with no slips
-    $('panel').classList.add('again');
-    $('hint').textContent = '↩ That one had a slip. Type it again with no slips.  (Tab to stop)';
-    beep(300, 0.12, 'triangle', 0.06);
-    net.toHost('done', { site: -1, clean: false, boss: false, n: 1, job: 0 });
-    tally({ text: o.text }, false, errs, 0);
-    paintChoices();
-    return;
-  }
-  $('panel').classList.remove('again'); T.miss = 0;
+  // A word finished with one slip still counts as the choice: there is no typing it all over again.
+  // (Two slips in one word send it back to its first letter, see typeChoice.)
+  CH.slips = 0; T.miss = 0;
   const secs = (performance.now() - CH.t0) / 1000;
   if (secs > 0.3 && o.text.length > 2) { const c = (o.text.length - 1) / secs; P.cps = P.cps ? P.cps * 0.8 + c * 0.2 : c; } // typing speed, for pacing a race
   if (m.game === 'run' && g.cols[g.col][o.id] === 1) { // ran into something
@@ -444,7 +442,7 @@ function chose(o) {
     delete g.labels[o.id];
     inside.mask |= 1 << o.id; inside.want = -1; inside.pop = 0;
   }
-  tally({ text: o.text }, true, errs, 0);
+  tally({ text: o.text }, clean, errs, 0); // a slip still breaks a clean streak
 }
 /** Set off down a maze corridor, as far as the next fork. */
 function mazeGo(d) {
@@ -611,7 +609,7 @@ function offerDrill() {
   $('drillSub').textContent = `${DRILL_EVERY} more buildings are up! These are the keys that trip you up the most. A little practice makes them easy.`;
   // what finishing it wins: something every time, and wardrobe gear that only practice can earn
   const next = S.ITEMS.filter(i => i.drill && !i.ok(P)).sort((a, b) => a.drill - b.drill)[0], togo = next ? next.drill - P.drills : 0;
-  $('drillPrize').textContent = '🎁 Finish it to win a 🏗️ crane (3 double loads) and a 🛡️ shield'
+  $('drillPrize').textContent = '🎁 Finish it to win a 🏗️ crane (3 double loads). Earn every ⭐ and you also get a 🛡️ shield'
     + (next ? `, and ${togo === 1 ? 'this one unlocks' : `you are ${togo} practices away from`} ${next.e} ${next.name} for your wardrobe.` : '.');
   $('drillIntro').classList.remove('hidden'); $('drillRun').classList.add('hidden');
   $('drill').classList.remove('hidden');
@@ -619,22 +617,30 @@ function offerDrill() {
   held.clear(); beep(660, 0.1, 'sine', 0.06); beep(880, 0.14, 'sine', 0.06, 0.12);
 }
 function startDrill() {
-  Object.assign(DR, { on: true, list: S.drillSet(P, DR.keys), i: 0, clean: 0 });
+  Object.assign(DR, { on: true, list: S.drillSet(P, DR.keys), i: 0, clean: 0, retry: [] });
   DR.total = DR.list.length;
   $('drillIntro').classList.add('hidden'); $('drillRun').classList.remove('hidden');
   $('drillGo').blur();
   $('dkb').appendChild($('kb')); // the keyboard picture helps here too
   nextDrill();
 }
+// Each line typed with no slips earns a star. A slip never holds anyone up: the
+// practice moves on, and at the end each slipped line gets one second chance in
+// a shorter, easier form. Every star earned wins the whole prize.
+function paintStars() {
+  $('drillStars').textContent = '⭐'.repeat(DR.clean) + '▫️'.repeat(Math.max(0, DR.total - DR.clean));
+}
 function nextDrill() {
-  $('drillBar').style.width = DR.i / DR.list.length * 100 + '%';
+  if (DR.i >= DR.list.length && DR.retry.length) { DR.list.push(...DR.retry); DR.retry = []; } // second chances
+  $('drillBar').style.width = DR.i / (DR.list.length + DR.retry.length) * 100 + '%';
+  paintStars();
   if (DR.i >= DR.list.length) return endDrill(true);
+  const p = DR.list[DR.i];
   DR.slip = false; // the keyboard picture stays away until a key is missed
-  setPrompt(DR.list[DR.i], drillEls(), () => {
-    const p = DR.list[DR.i];
-    if (!T.miss) DR.clean++;
-    // A line typed with a slip comes back a little later, until it is typed with none (three returns at most).
-    else if ((p.again | 0) < 3) DR.list.splice(Math.min(DR.list.length, DR.i + 3), 0, { ...p, again: (p.again | 0) + 1 });
+  $('drillNote').textContent = p.again ? 'Second chance: a shorter one. No slips and the star is yours!' : 'Type what you see. Slow and right beats fast and wrong.';
+  setPrompt(p, drillEls(), () => {
+    if (!T.miss) { DR.clean++; beep(880, 0.1, 'triangle', 0.07); }
+    else if (!p.again) DR.retry.push(S.easierLine(P, p, DR.keys));
     DR.i++; nextDrill();
   });
 }
@@ -644,12 +650,13 @@ function endDrill(finished) {
   if (was) { setPrompt(null, drillEls(), null); $('panel').appendChild($('kb')); }
   $('drill').classList.add('hidden');
   if (finished) {
-    const gift = P.shields < 3;
+    // Every star: the whole prize, and it counts toward wardrobe gear. Otherwise a crane for the effort.
+    const all = DR.clean >= DR.total, gift = all && P.shields < 3;
+    P.crane += 3;
     if (gift) P.shields++;
-    P.crane += 3; P.drills++;
-    const back = DR.list.length - DR.total;
-    toast('💪 Practice done!' + (back ? ` ${back} ${back === 1 ? 'line' : 'lines'} came back for another go.` : ' Not one slip!') + ` You win a 🏗️ crane${gift ? ' and a 🛡️ shield' : ''}.`, 'gold'); sfx.win();
-    confetti(me.x, me.y - 60, 100);
+    if (all) P.drills++;
+    toast(`💪 Practice done: ${DR.clean} of ${DR.total} stars! ` + (all ? `You win a 🏗️ crane${gift ? ' and a 🛡️ shield' : ''}.` : 'You win a 🏗️ crane. Get every star next time for the full prize.'), 'gold'); sfx.win();
+    if (all) confetti(me.x, me.y - 60, 100);
     for (const it of S.newUnlocks(P)) setTimeout(() => toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'), 1400);
   }
   S.saveProfile(P);
@@ -1504,6 +1511,7 @@ function frame(now) {
     if (inside.placed >= 6 && !inside.fin) finishRoom();
     if (inside.m.game === 'order' && !inside.job) {
       for (const k in g.open) g.open[k] = Math.max(0, g.open[k] - dt); // boxes close again after a look
+      if (inside.m.fun === 'boxes' && inside.placed < 6) g.intro = Math.min(G.boxIntroLen(g), g.intro + dt); // shown, boxed, then shuffled
       if (inside.m.fun === 'belt' && engaged) {
         // The belt gives time to spot a thing at this player's own speed while it is in sight, and hurries otherwise.
         // It stands still from the first letter typed until the word is done: nothing rolls away mid-word.
