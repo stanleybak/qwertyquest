@@ -134,7 +134,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 #crewNet small { display: block; color: #6b6480; font-weight: 600; font-size: .95rem; }
 #crewNet .code { font: 800 1.35rem var(--mono); color: var(--ink); background: #fff1e3; border-radius: 10px; padding: 6px 10px; margin: 4px 0 6px; user-select: all; }
 #hud #crewNet button { width: 100%; height: auto; font-size: 1.05rem; font-weight: 800; padding: 10px 12px; border-radius: 12px; background: #e3f6d8; }
-#drillSkip, #partyStay { display: block; margin: 12px auto 0; font-size: 1.1rem; }
+#drillSkip, #partyStay, #questSkip { display: block; margin: 12px auto 0; font-size: 1.1rem; }
 .ask { background: var(--paper); border-radius: 18px; padding: 14px 16px; box-shadow: 0 6px 18px #0005; font-size: 1.25rem; font-weight: 800; animation: pop .25s ease-out; }
 .ask button { margin: 10px 8px 0 0; font-size: 1.15rem; font-weight: 800; }
 .ask button.yes { background: var(--good); color: #fff; }
@@ -151,3 +151,5 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .prize { background: #fff1c9; border-radius: 14px; padding: 10px 14px; font-weight: 700; font-size: 1.1rem; margin: 6px 0 2px; }
 #drillStars { font-size: 1.3rem; letter-spacing: 2px; min-height: 1.6em; margin-top: 6px; }
 .opt.free small { font: 700 .55em var(--round); color: #2a7a4b; }
+#questWho > div { font-weight: 700; } #questWho .face { font-size: 3rem; line-height: 1.2; }
+#questWho small { display: block; color: #6b6480; font-weight: 600; }

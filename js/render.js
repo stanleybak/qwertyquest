@@ -296,6 +296,13 @@ export function draw(ctx, v) {
           if (!fin) { ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(sx(s.x), by, 15, 0, 7); ctx.fill(); }
           emoji(ctx, fin ? '⭐' : '❗', sx(s.x), by + 1, fin ? 24 : 18);
           emoji(ctx, '🚪', sx(s.x) + s.w / 2 - 18, sy(s.y) - 14, 0.1); // warm the glyph cache
+          const mark = v.marks && v.marks.get(id); // an errand leads here
+          if (mark) {
+            const my = by - 44 - Math.abs(Math.sin(t * 4)) * 10;
+            ctx.fillStyle = '#fff'; ctx.strokeStyle = '#ff8a3d'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.arc(sx(s.x), my, 22, 0, 7); ctx.fill(); ctx.stroke();
+            emoji(ctx, mark, sx(s.x), my + 1, 24);
+          }
         }
       } });
     });

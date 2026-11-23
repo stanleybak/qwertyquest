@@ -85,11 +85,13 @@ export const ITEMS = [
   { id: 'p6', slot: 'pet', e: '🦄', name: 'Unicorn', how: '20 three-star lessons', ok: p => p.stars3 >= 20 },
   { id: 'p7', slot: 'pet', e: '🐕‍🦺', name: 'Rescue dog', how: 'Help fix 20 city problems', ok: p => p.thanks >= 20 },
   { id: 'p8', slot: 'pet', e: '🦉', name: 'Wise owl', how: 'Finish a tricky key practice', drill: 1, ok: p => p.drills >= 1 },
+  { id: 'p9', slot: 'pet', e: '🕊️', name: 'Messenger dove', how: 'Finish an errand around town', ok: p => p.errands >= 1 },
   { id: 'r0', slot: 'ride', e: '', name: 'On foot', how: '', ok: () => true },
   { id: 'r1', slot: 'ride', e: '🛴', name: 'Scooter', how: '20 clean loads in a row', ok: p => p.bestStreak >= 20 },
   { id: 'r2', slot: 'ride', e: '🛹', name: 'Skateboard', how: '7 three-star lessons', ok: p => p.stars3 >= 7 },
   { id: 'r3', slot: 'ride', e: '🚲', name: 'Bike', how: 'Play on 5 different days', ok: p => p.days >= 5 },
   { id: 'r4', slot: 'ride', e: '🚜', name: 'Tractor', how: '15 three-star lessons', ok: p => p.stars3 >= 15 },
+  { id: 'r6', slot: 'ride', e: '🛺', name: 'Delivery cart', how: 'Finish 4 errands around town', ok: p => p.errands >= 4 },
   { id: 'r5', slot: 'ride', e: '🚀', name: 'Rocket', how: 'Finish 8 tricky key practices', drill: 8, ok: p => p.drills >= 8 },
 ];
 export const itemById = id => ITEMS.find(i => i.id === id);
@@ -110,7 +112,7 @@ export function loadProfile() {
   p = Object.assign({
     name: '', color: 0, step: 0, placed: false, credits: 0, badRun: 0,
     lesson: { n: 0, hit: 0, miss: 0 }, keys: {}, streak: 0, bestStreak: 0,
-    stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, drills: 0, help: {}, tips: {}, fresh: 12, shields: 0, crane: 0,
+    stars3: 0, perfect: 0, days: 0, loads: 0, thanks: 0, drills: 0, errands: 0, quest: null, help: {}, tips: {}, fresh: 12, shields: 0, crane: 0,
     wear: { hat: 'h0', tool: 't0', pet: 'p0', ride: 'r0' }, seen: ['h0', 't0', 'p0', 'r0'],
     day: { date: '', lessons: 0, promos: 0 }, pacing: true, guide: true, sound: true, vol: 0.5, volSet: false,
     layout: 'qwerty', other: null,

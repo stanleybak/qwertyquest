@@ -15,6 +15,7 @@
   <div class="hud-left">
     <div id="district" class="chip big"></div>
     <div id="role" class="chip" title="Your job this round. Jobs rotate."></div>
+    <div id="questChip" class="chip hidden"></div>
   </div>
   <div class="hud-mid">
     <div id="comboBox" class="meter" title="Team combo: fills when everyone types cleanly"><div id="combo"></div><span>TEAM COMBO</span></div>
@@ -100,6 +101,17 @@
       <div id="dprompt"></div>
       <div id="dkb"></div>
     </div>
+  </div>
+</div>
+
+<div id="quest" class="screen hidden">
+  <div class="card wide">
+    <h2 id="questTitle"></h2>
+    <p id="questAsk" class="sub"></p>
+    <div id="questWho" class="caps"></div>
+    <p id="questPrize" class="prize"></p>
+    <button id="questGo" class="primary">Let's go ▶</button>
+    <button id="questSkip" class="link" type="button">Not now</button>
   </div>
 </div>
 

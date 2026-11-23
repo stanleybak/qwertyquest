@@ -751,6 +751,80 @@ function endDrill(finished) {
 $('drillGo').onclick = startDrill;
 $('drillSkip').onclick = () => endDrill(false);
 
+// ---------- errands ----------
+// Now and then a neighbor has an errand: visit three (later five) buildings
+// that are already finished, and do a little typing for the neighbor in each.
+// The buildings are marked on the map. An errand belongs to one player and is
+// kept with their progress; finishing it wins a prize.
+const ERRANDS = [
+  { icon: '📚', title: 'Book drive', ask: 'The library is collecting books. Pick one up from each of these neighbors.', at: 'for a book', got: 'hands you a book' },
+  { icon: '✉️', title: 'Party invitations', ask: 'There is going to be a party! Take an invitation to each of these neighbors.', at: 'about the party', got: 'takes an invitation and beams' },
+  { icon: '🥕', title: 'Soup for everyone', ask: 'A big pot of soup needs something from every kitchen. Collect one thing from each of these neighbors.', at: 'for something for the soup', got: 'adds something to your basket' },
+  { icon: '🎁', title: 'Surprise presents', ask: 'Shh! There is a present for each of these neighbors. Go and hand them out.', at: 'with a present', got: 'opens the present and laughs' },
+  { icon: '🔑', title: 'Spare keys', ask: 'The locksmith made new spare keys. Take one to each of these neighbors.', at: 'with a spare key', got: 'hangs the key on a hook' },
+];
+const ERRAND_TASKS = 2;   // prompts typed for each neighbor
+const ERRAND_EVERY = 30;  // prompts between one errand and the next being offered
+/** Finished buildings an errand can lead to. */
+function errandSpots() {
+  const out = [];
+  for (let i = 0; i <= st.d; i++) for (let k = 0; k < 6; k++) {
+    if (missionFor(i, k).game !== 'team' && (i < st.d || st.have[k] >= district(i).sites[k].need) && roomDone(roomKeyOf(i, k)) && !jobIn(`${i}:${k}`)) out.push(`${i}:${k}`);
+  }
+  return out;
+}
+const errandLeft = () => (P.quest ? P.quest.ids.filter(id => !P.quest.got.includes(id)) : []);
+/** Is the building this player is in one the errand still leads to? */
+const errandHere = () => !!inside && !inside.job && inside.placed >= 6 && errandLeft().includes(inside.id);
+function offerErrand() {
+  const spots = errandSpots();
+  P.questAt = P.loads;
+  if (spots.length < 3) return;
+  const ids = spots.sort(() => Math.random() - 0.5).slice(0, spots.length >= 10 ? 5 : 3), k = (Math.random() * ERRANDS.length) | 0, e = ERRANDS[k];
+  $('questTitle').textContent = `${e.icon} ${e.title}`;
+  $('questAsk').textContent = e.ask;
+  const box = $('questWho'); box.innerHTML = '';
+  for (const id of ids) {
+    const m = missionFor(...id.split(':').map(Number)), d = document.createElement('div');
+    const f = document.createElement('div'); f.className = 'face'; f.textContent = m.face;
+    const s = document.createElement('small'); s.textContent = m.title;
+    d.append(f, m.who, s); box.appendChild(d);
+  }
+  $('questPrize').textContent = `🎁 Visit all ${ids.length} to win a 🏗️ crane (3 double loads) and a 🛡️ shield. Their buildings are marked ${e.icon} on the map.`;
+  $('questGo').onclick = () => { P.quest = { k, ids, got: [], n: 0 }; S.saveProfile(P); $('quest').classList.add('hidden'); $('questGo').blur(); toast(`${e.icon} ${e.title}: follow the ${e.icon} marks.`, 'gold'); };
+  $('questSkip').onclick = () => { S.saveProfile(P); $('quest').classList.add('hidden'); };
+  $('quest').classList.remove('hidden');
+  $('questGo').focus();
+  held.clear(); beep(660, 0.1, 'sine', 0.06); beep(880, 0.14, 'sine', 0.06, 0.12);
+}
+/** One prompt typed for the neighbor here. */
+function errandStep() {
+  const q = P.quest, e = ERRANDS[q.k], m = inside.m;
+  if (++q.n < ERRAND_TASKS) return;
+  q.n = 0; q.got.push(inside.id);
+  const left = errandLeft().length;
+  inside.talk = 0; confetti(me.x, me.y - 60, 30); sfx.win();
+  if (left) { toast(`${e.icon} ${m.who} ${e.got}. ${left} more to go!`, 'gold'); S.saveProfile(P); return; }
+  const shield = P.shields < 3;
+  P.crane += 3; if (shield) P.shields++;
+  P.errands++; P.quest = null; P.questAt = P.loads;
+  toast(`🎉 ${e.title}: all done! You win a 🏗️ crane${shield ? ' and a 🛡️ shield' : ''}.`, 'gold');
+  for (const it of S.newUnlocks(P)) setTimeout(() => toast(`🎁 New in your wardrobe: ${it.e} ${it.name}`, 'gold'), 1400);
+  S.saveProfile(P);
+}
+/** Which way to walk for the nearest building left on the errand. */
+function errandHint() {
+  const e = ERRANDS[P.quest.k];
+  let best = null, bd = Infinity;
+  for (const id of errandLeft()) {
+    const [i, k] = id.split(':').map(Number), s = district(i).sites[k], d = Math.hypot(s.x - me.x, s.y - me.y);
+    if (d < bd) { bd = d; best = { s, m: missionFor(i, k) }; }
+  }
+  if (!best) return '';
+  const arrow = ['➡️', '↘️', '⬇️', '↙️', '⬅️', '↖️', '⬆️', '↗️'][((Math.round(Math.atan2(best.s.y - me.y, best.s.x - me.x) / (Math.PI / 4)) % 8) + 8) % 8];
+  return `${e.icon} ${e.title}: ${best.m.who} is this way ${arrow}, at ${best.m.title.replace(/^The /, 'the ')}.`;
+}
+
 // ---------- network glue ----------
 function profileMsg() {
   const w = P.wear, e = id => S.itemById(id)?.e || '';
@@ -1290,6 +1364,7 @@ function finishPrompt(secs) {
   const slot = inside && !job && inside.m.game === 'furnish' ? +key.split(':').pop() : undefined; // which spot in the room
   net.toHost('done', { site: inside ? -1 : T.site, clean: ok, boss, n, job, room: inside && !job ? roomKey(inside.id) : undefined, slot });
   lastSlip = !ok;
+  if (ok && key[0] === 'q' && P.quest && inside) errandStep();
   if (ok && secs > 0.3 && p.text.length > 2) { const c = (p.text.length - 1) / secs; P.cps = P.cps ? P.cps * 0.8 + c * 0.2 : c; } // how fast this player types, for pacing a race
   if (!ok) {
     // Not delivered. The same prompt returns after the next one, until it is typed with no slips.
@@ -1344,6 +1419,7 @@ function context() {
     const j = inside.job && st.jobs.find(x => x.id === inside.job);
     if (inside.job && !j) inside.job = 0; // solved: the room goes back to normal
     if (j) { const i = inside.nearF = G.nearFire(inside, j.hp); return { base: i >= 0 ? `j${j.id}:${i}` : null, job: j, zone: -1 }; }
+    if (errandHere()) return { base: 'q' + inside.id, job: null, zone: -1 }; // an errand for the neighbor here
     if (inside.m.game !== 'furnish') return { base: inside.placed < 6 ? `i${inside.id}:g` : null, job: null, zone: -1 };
     const sp = inside.near = nearSpot(inside);
     // any empty spot will do, unless someone else is already on it
@@ -1369,8 +1445,9 @@ function updatePrompt() {
   if (engaged) {
     // a runaway (thief, pet, penguin) holds still for as long as someone is typing at it
     if (c.job && JOBS[c.job.t].kind === 'run' && performance.now() - heldAt > 1000) { heldAt = performance.now(); net.toHost('hold', { job: c.job.id }); }
-    if (inside && !c.job && inside.m.game === 'team') { teamPrompt(); return c.zone; }
-    if (choosing()) { if (!CH.opts && !inside.g.path.length) dealChoices(); return c.zone; }
+    const errand = engaged[0] === 'q';
+    if (!errand && inside && !c.job && inside.m.game === 'team') { teamPrompt(); return c.zone; }
+    if (!errand && choosing()) { if (!CH.opts && !inside.g.path.length) dealChoices(); return c.zone; }
     if (!T.p) {
       T.key = engaged; T.site = c.zone; T.jobType = c.job ? c.job.t : -1;
       const role = c.base === 'boss' || c.job || inside ? 0 : myRole();
@@ -1385,6 +1462,7 @@ function updatePrompt() {
       $('hint').textContent = (p.redo ? '↩ Try this one again with no slips.'
         : lastSlip ? 'Oops, a slip. That one will come back.'
           : c.job ? JOBS[c.job.t].hint
+          : errand ? `Type it for ${inside.m.who}.`
           : inside ? ( `Type to bring in the next thing for ${inside.m.who}.`)
         : c.base === 'boss' ? 'Throw bricks at the Typo Monster!'
             : p.show ? (p.hint ? `Fix it! It should say: ${p.hint}` : 'Spot the mistake, then type it the right way.')
@@ -1394,7 +1472,8 @@ function updatePrompt() {
     return c.zone;
   }
   let hint;
-  if (inside && c.job) {
+  if (inside && c.base && c.base[0] === 'q') hint = `${ERRANDS[P.quest.k].icon} Press Enter to see ${inside.m.who} ${ERRANDS[P.quest.k].at}.  (Q to go outside)`;
+  else if (inside && c.job) {
     const what = c.job.t ? 'leak' : 'fire';
     hint = c.base ? `Press Enter to ${c.job.t ? 'fix this leak' : 'spray this fire'}.` : `Walk to a ${what} with the arrow keys.  (Q to go outside)`;
   } else if (inside && inside.m.game !== 'furnish') {
@@ -1416,11 +1495,13 @@ function updatePrompt() {
   else if (c.job) hint = `Press Enter to help. ${JOBS[c.job.t].hint}`;
   else if (c.base) hint = 'Press Enter to start building here.';
   else if (doorId && jobIn(doorId)) hint = `${JOBS[jobIn(doorId).t].icon} Trouble inside! Press Enter to go in and help.`;
+  else if (doorId && errandLeft().includes(doorId)) hint = `${ERRANDS[P.quest.k].icon} ${missionFor(...doorId.split(':').map(Number)).who} is in here. Press Enter to go in.`;
   else if (doorId && finaleShut(doorId)) hint = '🔒 The team building. It opens when the five other neighbors here have been helped.';
   else if (doorId && isFinale(...doorId.split(':').map(Number)) && !roomDone(roomKey(doorId))) hint = '🤝 The team building is open! Everyone goes in together. Press Enter.';
   else if (doorId) hint = roomDone(roomKey(doorId)) ? '🚪 Press Enter to visit.' : '🚪 Press Enter to go in and help.';
   else if (district(st.d).sites.every((s, k) => st.have[k] >= s.need)) hint = 'All built! Now go inside each ❗ building and help. Press Enter for the nearest one.';
   else hint = 'Walk to a glowing circle. Press Enter for the nearest one.';
+  if (P.quest && !inside && !c.base && !doorId) hint = errandHint() || hint;
   $('hint').textContent = hint;
   return c.zone;
 }
@@ -1429,6 +1510,7 @@ function updatePrompt() {
 function leftIn(c) {
   if (!engaged) return 0;
   if (c.job) return c.job.hp;
+  if (engaged[0] === 'q') return P.quest ? ERRAND_TASKS - P.quest.n : 0;
   if (inside) return inside.m.game === 'maze' ? 0 : 6 - inside.placed; // a maze in the dark does not say how far it is
   if (c.base === 'boss') return st.boss ? st.boss.hp : 0;
   return c.zone >= 0 ? district(st.d).sites[c.zone].need - st.have[c.zone] : 0;
@@ -1579,6 +1661,9 @@ function updateHud(now) {
   $('district').title = 'Buildings built, and neighbors helped inside them. Both must reach 6 to open the next neighborhood.';
   const r = S.ROLES[myRole()];
   $('role').textContent = `Your job: ${r.icon} ${r.name}`;
+  const q = P.quest;
+  $('questChip').classList.toggle('hidden', !q);
+  if (q) { $('questChip').textContent = `${ERRANDS[q.k].icon} ${q.got.length}/${q.ids.length}`; $('questChip').title = `${ERRANDS[q.k].title}: still to visit ${errandLeft().map(id => missionFor(...id.split(':').map(Number)).who).join(', ')}`; }
   $('combo').style.width = Math.min(100, st.combo * 100) + '%';
   $('bossbar').classList.toggle('hidden', !st.boss);
   if (st.boss) { $('bosshp').style.width = st.boss.hp / st.boss.max * 100 + '%'; $('bosstxt').textContent = `TYPO MONSTER · ${Math.ceil(st.boss.left)}s`; }
@@ -1728,6 +1813,8 @@ function frame(now) {
   const modal = document.querySelector('.screen:not(.hidden)');
   const zone = modal ? -1 : updatePrompt();
   if (!modal && !busy() && (P.sinceDrill | 0) >= DRILL_EVERY) offerDrill();
+  else if (!modal && !busy() && !P.quest && P.loads >= 12 && P.loads - (P.questAt ?? -99) >= ERRAND_EVERY) offerErrand();
+  if (P.quest && !inside && errandLeft().some(id => !roomDone(roomKey(id)))) P.quest = null; // the city changed: that errand is off
   if (!modal) greet();
 
   for (let i = fx.length - 1; i >= 0; i--) {
@@ -1752,6 +1839,7 @@ function frame(now) {
   draw(ctx, {
     w: vw, h: vh, cam, st, t: now / 1000, me, others: liveOthers(now).filter(o => !o.inside), all: liveOthers(now),
     door: doorId, roomDone: id => roomDone(roomKey(id)),
+    marks: P.quest ? new Map(errandLeft().map(id => [id, ERRANDS[P.quest.k].icon])) : null,
     zone, job: curJob, weak: st.boss ? S.weakKeys(P, 4) : [], bossHit, fx,
   });
   updateKb(T.p ? T.p.text[T.pos] : null);
