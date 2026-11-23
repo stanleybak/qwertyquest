@@ -147,7 +147,7 @@ export class Net {
       console.warn('network unavailable, playing solo', e);
       this.room = null; return;
     }
-    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'hold', 'vote', 'move', 'ask', 'welcome', 'deny']) {
+    for (const kind of ['state', 'done', 'pos', 'me', 'grab', 'grant', 'offer', 'hold', 'vote', 'team', 'move', 'ask', 'welcome', 'deny']) {
       const a = this.acts[kind] = this.room.makeAction(kind);
       a.onMessage((data, ctx) => this._recv(kind, data, ctx.userId));
     }
@@ -294,7 +294,7 @@ export class Net {
       return;
     }
     if (!this.world || !this.order.includes(from)) return; // only members of this city are heard
-    if ((kind === 'done' || kind === 'grab' || kind === 'offer' || kind === 'hold' || kind === 'vote') && !this.isHost) return;
+    if ((kind === 'done' || kind === 'grab' || kind === 'offer' || kind === 'hold' || kind === 'vote' || kind === 'team') && !this.isHost) return;
     this.h.onMsg(kind, data, from);
   }
 

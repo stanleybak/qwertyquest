@@ -1,5 +1,5 @@
 import JOBS from './jobs.js';
-import { missionFor } from './missions.js';
+import { missionFor, setMix } from './missions.js';
 import { orderSeq } from './games.js';
 export { JOBS }; // city problems that pop up and need typing to fix
 
@@ -120,6 +120,8 @@ export function newState() {
     vote: null, // a restart being voted on: { by, yes: [ids], left }
     built: 0, next: null, // neighborhoods already constructed beyond the frontier (see Host.settle)
     rooms: {}, // how far each neighbor inside a building has been helped, 0 to 6: shared by everyone
+    mix: 0,    // the neighborhood from which the bigger mix of games and the team building apply (see missions.js)
+    team: null, // the team building's game while it is open: see Host.teamTick
   };
 }
 // Cities this device has been part of: { id: { key, name, d, have, total, at } }.
@@ -130,7 +132,7 @@ export function loadWorlds() {
 }
 export function saveWorld(world, st) {
   const all = loadWorlds();
-  all[world.id] = { key: world.key, name: world.name, d: st.d, have: st.have, total: st.total, rooms: st.rooms || {}, built: st.built | 0, next: st.next || null, gen: st.gen | 0, at: Date.now() };
+  all[world.id] = { key: world.key, name: world.name, d: st.d, have: st.have, total: st.total, rooms: st.rooms || {}, built: st.built | 0, next: st.next || null, gen: st.gen | 0, mix: st.mix, at: Date.now() };
   const ids = Object.keys(all).sort((a, b) => all[b].at - all[a].at);
   for (const id of ids.slice(8)) delete all[id]; // keep the eight most recent
   try { localStorage.setItem(SAVES, JSON.stringify(all)); } catch { /* ignore */ }
@@ -172,7 +174,52 @@ const roomOk = (k, d) => typeof k === 'string' && /^\d{1,4}:[0-5]:[a-z]{1,12}$/.
 
 /** Host-side rules. `st` is the live state object; mutate it in place. */
 export class Host {
-  constructor(st) { this.st = st; this.clean = {}; this.itemIn = 90; this.recent = []; st.rooms ||= {}; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100; }
+  constructor(st) {
+    this.st = st; this.clean = {}; this.itemIn = 90; this.recent = []; st.rooms ||= {}; st.jobs ||= []; st.jobId ||= 1; st.jobIn ??= 100;
+    // A city from before the bigger mix of games: it starts at the next neighborhood, or at this one if nobody has been helped here yet.
+    if (!Number.isInteger(st.mix)) st.mix = Object.keys(st.rooms).some(k => k.startsWith(st.d + ':')) ? st.d + 1 : st.d;
+    setMix(st.mix);
+  }
+
+  /**
+   * The team building. key: its room, or '' while it is shut or done. here: who
+   * is inside it. need: everyone connected (and not away). The game starts once
+   * all of them are in, and then belongs to whoever is inside.
+   *   ball: the holder throws to a teammate; `goal` passes win.
+   *   lift: a round is done when everyone has typed; six rounds win.
+   *   pump: every word adds air, and it leaks all the time; a full balloon wins.
+   */
+  teamTick(dt, key, kind, here, need) {
+    const st = this.st;
+    if (!key) { st.team = null; return; }
+    let t = st.team;
+    if (!t || t.key !== key) t = st.team = { key, kind, on: false, n: 0, goal: 6, turn: '', from: '', did: {}, lvl: 0, here: [], need: [] };
+    t.here = here; t.need = need;
+    if (!t.on) {
+      if (here.length && need.every(id => here.includes(id))) { t.on = true; t.turn = here[0]; t.goal = kind === 'ball' ? Math.min(14, 6 + 2 * here.length) : 6; }
+      return;
+    }
+    if (!here.length) { Object.assign(t, { on: false, n: 0, lvl: 0, did: {}, from: '' }); return; } // everyone walked out: it starts over
+    if (kind === 'ball' && !here.includes(t.turn)) t.turn = here[0];
+    if (kind === 'lift' && here.every(id => t.did[id])) { t.n++; t.did = {}; }
+    const won = kind === 'pump' ? t.lvl >= 1 : t.n >= t.goal; // looked at before the leak: a balloon pumped full is full
+    if (kind === 'pump') t.lvl = Math.max(0, t.lvl - 0.012 * dt);
+    if (won) {
+      st.rooms[key] = 127; st.team = null;
+      this.event('room', { room: key, by: here[0] });
+      this.settle();
+    }
+  }
+  /** A player in the team building did their part. m: { to } for a throw. */
+  teamAct(from, m) {
+    const t = this.st.team;
+    if (!t || !t.on || !t.here.includes(from)) return;
+    if (t.kind === 'ball') {
+      if (t.turn !== from) return;
+      t.from = from; t.turn = m && t.here.includes(m.to) ? m.to : from; t.n++;
+    } else if (t.kind === 'lift') t.did[from] = 1;
+    else t.lvl = Math.min(1, t.lvl + 1 / (5 * t.here.length + 1));
+  }
 
   /** Start a city problem that suits this neighborhood and has not come up lately. */
   spawnJob() {
@@ -329,8 +376,9 @@ export class Host {
     if (!v) return;
     const all = st.order.length ? st.order : [v.by];
     if (!all.every(id => v.yes.includes(id))) return;
+    setMix(0); // a fresh city has every game from its first neighborhood
     Object.assign(st, {
-      gen: (st.gen | 0) + 1, vote: null, d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, combo: 0, rooms: {}, built: 0, next: null,
+      gen: (st.gen | 0) + 1, vote: null, mix: 0, team: null, d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, combo: 0, rooms: {}, built: 0, next: null,
       boss: null, bossIn: 420, items: [], jobs: [], jobIn: 150,
     });
     this.recent = [];
@@ -360,7 +408,7 @@ export class Host {
     // A copy from before the city was last started over is out of date; one from after replaces this city.
     const gen = w.gen | 0;
     if (gen < (st.gen | 0)) return;
-    if (gen > (st.gen | 0)) { Object.assign(st, { gen, d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, rooms: {}, built: 0, next: null, boss: null, items: [], jobs: [] }); this.event('merged'); }
+    if (gen > (st.gen | 0)) { setMix(Number.isInteger(w.mix) ? w.mix : 0); Object.assign(st, { gen, mix: Number.isInteger(w.mix) ? w.mix : 0, team: null, d: 0, have: [0, 0, 0, 0, 0, 0], total: 0, rooms: {}, built: 0, next: null, boss: null, items: [], jobs: [] }); this.event('merged'); }
     for (const [k, n] of Object.entries(w.rooms && typeof w.rooms === 'object' ? w.rooms : {}).slice(0, 2000)) {
       if (roomOk(k, Math.max(st.d, w.d))) st.rooms[k] = 64 | toMask(k, st.rooms[k]) | toMask(k, Math.min(127, Math.max(0, n | 0)));
     }

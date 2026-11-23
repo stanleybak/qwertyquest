@@ -3,7 +3,7 @@ import * as S from './skill.js';
 import { Net, findRoom } from './net.js';
 import { Host, newState, loadWorlds, saveWorld, dropWorld, legacyWorld, roomKeyOf, toMask, district, ZONE_R, JOBS, onRiver, walkable, cellOf } from './world.js';
 import * as Voice from './voice.js';
-import { missionFor, drawInterior, nearSpot } from './missions.js';
+import { missionFor, drawInterior, nearSpot, isFinale, setMix } from './missions.js';
 import { draw, drawPlayer, COLORS } from './render.js';
 import * as G from './games.js';
 import DATA from './content-data.js';
@@ -290,7 +290,7 @@ function typeChar(ch) {
 // ---------- choices: several labels on offer, type one to pick it ----------
 /** The spot being filled in a room where the right thing has to be chosen for it, or -1. */
 const pickSpot = () => (inside && !inside.job && inside.m.pick && engaged && engaged.startsWith('i') ? +engaged.split(':').pop() : -1);
-const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || inside.m.game === 'order' || inside.m.game === 'run' || pickSpot() >= 0);
+const choosing = () => !!inside && !inside.job && (inside.m.game === 'maze' || inside.m.game === 'order' || inside.m.game === 'run' || inside.m.game === 'quiz' || pickSpot() >= 0);
 /** The key the guide should point at: only known when one choice is left in play. */
 function nextKey() {
   if (T.p) return T.p.text[T.pos];
@@ -309,6 +309,13 @@ function dealChoices() {
   } else if (m.game === 'run') { // all three lanes at the next stop: the scene shows which are clear
     g.labels = {}; g.col = inside.placed;
     opts = g.cols[g.col].map((c, l) => ({ id: l, icon: G.LANE_ICONS[l] + (c === 2 ? '⚡' : ''), long: c === 2 }));
+  } else if (m.game === 'quiz') {
+    if (m.fun === 'tune') { // the tune plays first, and again whenever a new one starts
+      const s = G.tuneAt(inside.placed)[0];
+      if (g.sung !== s) { g.sung = s; g.play = 0; }
+      if (g.play < G.tuneLen(g, inside.placed)) { $('hint').textContent = '👂 Listen to the tune…'; $('prompt').innerHTML = ''; return; }
+    }
+    opts = G.quizOpts(m, g, inside.placed);
   } else if (spot >= 0) { // the thing that belongs here, among a few that do not
     const rest = [0, 1, 2, 3, 4, 5].filter(k => k !== spot && !(inside.mask >> k & 1)).map(k => inside.perm[k]).sort(() => Math.random() - 0.5).slice(0, 3);
     g.labels = {}; opts = [inside.perm[spot], ...rest].sort((a, b) => a - b).map(i => ({ id: i, icon: m.items[i] }));
@@ -346,6 +353,7 @@ function dealChoices() {
   $('panel').classList.remove('again');
   $('hint').textContent = (m.game === 'maze' ? (shut ? '🔒 This door is locked. Find the 🗝️ key! ' : '') + (opts.every(o => o.free) ? 'You have been every way from here. Press an arrow key to go.' : 'Which way? Type the word by an arrow.' + (opts.some(o => o.free) ? ' Green: you have been that way. Just press that arrow key.' : ''))
     : m.game === 'run' ? 'Which lane is clear? Type its word.' + (opts.some(o => o.long) ? ` A ⚡ lane takes longer to type, but it trips up ${m.rival ? m.rival[1] : 'the other runner'}.` : '')
+    : m.game === 'quiz' ? (g.note ? g.note + ' ' : '') + G.quizAsk(m, g, inside.placed)
     : m.fun === 'belt' ? (opts.some(o => o.id === inside.want) ? `Grab ${item} for ${m.who}! Start typing its word and the belt waits for you.` : `${item} is coming round. Get ready!`)
     : m.fun === 'boxes' ? `${m.who} wants ${item} from you. Which box is it in? Type a box's word to look inside.`
     : m.pick === 'color' ? 'Which book matches the color of this shelf tag? Type its word.'
@@ -402,6 +410,24 @@ function chose(o) {
   CH.slips = 0; T.miss = 0;
   const secs = (performance.now() - CH.t0) / 1000;
   if (secs > 0.3 && o.text.length > 2) { const c = (o.text.length - 1) / secs; P.cps = P.cps ? P.cps * 0.8 + c * 0.2 : c; } // typing speed, for pacing a race
+  if (m.game === 'team') { // the ball: thrown to the teammate whose word this was
+    inside.threw = st.team?.n; net.toHost('team', { to: o.id });
+    CH.opts = null; $('prompt').innerHTML = ''; sfx.load();
+    tally({ text: o.text }, clean, errs, 0);
+    return;
+  }
+  if (m.game === 'quiz') {
+    const right = G.quizRight(m, g, inside.placed);
+    if (o.id !== right) {
+      g.note = G.quizMiss(m, g, o.id, right); // stays on screen with the next deal
+      $('hint').textContent = g.note + '  (Tab to stop)';
+      beep(220, 0.14, 'triangle', 0.06);
+      if (m.fun === 'dig' || m.fun === 'tune') { CH.opts = null; $('prompt').innerHTML = ''; } else paintChoices(); // deal again: a spot is gone, or the tune plays again
+      return;
+    }
+    g.note = '';
+    if (m.fun === 'tune') beep(G.pitchOf(o.id), 0.3, 'triangle', 0.1);
+  }
   if (m.game === 'run' && g.cols[g.col][o.id] === 1) { // ran into something
     $('hint').textContent = 'Bonk! Something is in that lane. Look for a clear one.  (Tab to stop)';
     me.stumble = 0.6; beep(160, 0.2, 'sawtooth', 0.07);
@@ -431,7 +457,7 @@ function chose(o) {
     return;
   }
   sfx.load();
-  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'maze' ? undefined : roomKey(inside.id), slot: spot >= 0 ? spot : m.game === 'run' ? undefined : o.id });
+  net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: m.game === 'maze' ? undefined : roomKey(inside.id), slot: spot >= 0 ? spot : m.game === 'run' || m.game === 'quiz' ? undefined : o.id });
   CH.opts = null; $('prompt').innerHTML = '';
   if (m.game === 'maze') mazeGo(o.id);
   else if (m.game === 'run') {
@@ -440,12 +466,70 @@ function chose(o) {
     for (let b = 0; b < 6; b++) if (!(inside.mask >> b & 1)) { inside.mask |= 1 << b; break; }
     inside.pop = 0;
   }
+  else if (m.game === 'quiz') {
+    const n = m.fun === 'dig' ? 2 : 1; // a treasure is worth two of the six
+    if (n === 2) net.toHost('done', { site: -1, clean: true, boss: false, n: 1, job: 0, room: roomKey(inside.id) });
+    for (let k = 0; k < n; k++) for (let b = 0; b < 6; b++) if (!(inside.mask >> b & 1)) { inside.mask |= 1 << b; break; }
+    inside.placed = bits(inside.mask); inside.pop = 0;
+    G.quizHit(m, g);
+  }
   else if (spot >= 0) { inside.mask |= 1 << spot; inside.last = spot; inside.want = -1; inside.pop = 0; inside.talk = 0; }
   else {
     delete g.labels[o.id];
     inside.mask |= 1 << o.id; inside.want = -1; inside.pop = 0;
   }
   tally({ text: o.text }, clean, errs, 0); // a slip still breaks a clean streak
+}
+/**
+ * The team building. Nothing starts until everyone connected is inside. Then:
+ * ball: whoever holds it types a teammate's word to throw it to them;
+ * lift: everyone types one prompt a round, and the round ends when all have;
+ * pump: everyone types as fast as they cleanly can, against a leak.
+ */
+function teamPrompt() {
+  const t = st.team, m = inside.m, id = net.selfId, els = { prompt: $('prompt'), found: $('found') };
+  const nm = x => (x === id ? 'you' : others.get(x)?.name || 'a friend');
+  const idle = text => {
+    if (T.p) setPrompt(null, els, null);
+    if (CH.opts) CH.opts = null;
+    $('prompt').innerHTML = ''; $('hint').textContent = text + '  (Tab to stop)';
+  };
+  if (!t || t.key !== roomKey(inside.id) || !t.on) {
+    const out = (t?.need || []).filter(x => !(t.here || []).includes(x)).map(nm);
+    return idle(out.length ? `Waiting for everyone to come in: ${out.join(', ')}.` : 'Getting ready…');
+  }
+  if (m.team === 'ball') {
+    if (t.turn !== id || inside.threw === t.n) return idle(`${t.turn === id ? 'There it goes' : nm(t.turn) + ' has the ball'}. Get ready to catch!`);
+    if (CH.opts && CH.at === t.n) return;
+    // anyone but the one who just threw it here (with three or more), so the ball gets around
+    const to = t.here.filter(x => x !== id && (t.here.length < 3 || x !== t.from)), used = [];
+    const opts = (to.length ? to : [id]).map(x => ({ id: x, icon: x === id ? '🧱 wall' : `🏀 ${nm(x)}` }));
+    for (const o of opts) {
+      let w = '';
+      for (let k = 0; !w && k < 300; k++) { const c = S.choicePrompt(P); if (!used.some(u => u.startsWith(c) || c.startsWith(u)) || k > 280) w = c; }
+      o.text = w; used.push(w);
+    }
+    if (T.p) setPrompt(null, els, null);
+    Object.assign(CH, { opts, buf: '', clean: true, slips: 0, at: t.n });
+    T.errs = new Set(); T.miss = 0; T.shown = performance.now();
+    $('hint').textContent = (to.length ? 'You have the ball! Type a teammate\'s word to throw it to them.' : 'Bounce the ball off the wall: type the word.') + '  (Tab to stop)';
+    paintChoices();
+    return;
+  }
+  if (m.team === 'lift' && (t.did[id] || inside.threw === t.n)) return idle(`Heave! Waiting for: ${t.here.filter(x => !t.did[x] && x !== id).map(nm).join(', ') || 'the bell'}.`);
+  if (T.p) return;
+  setPrompt(S.genPrompt(P, 0, false), els, secs => {
+    const p = T.p, ok = T.clean;
+    if (ok) { net.toHost('team', {}); sfx.load(); if (m.team === 'lift') inside.threw = t.n; } else beep(300, 0.12, 'triangle', 0.06);
+    tally(p, ok, T.errs, secs);
+    T.p = null; me.prog = 0;
+  });
+  $('hint').textContent = (m.team === 'lift' ? 'Type it to pull the rope. The bell goes up when everyone has pulled.' : 'Pump! Every word with no slips adds air. Keep it coming!') + '  (Tab to stop)';
+}
+/** Is this the team building, still shut because the other five neighbors have not all been helped? */
+function finaleShut(id) {
+  const [i, k] = id.split(':').map(Number);
+  return isFinale(i, k) && !roomDone(roomKeyOf(i, k)) && ![0, 1, 2, 3, 4].every(j => roomDone(roomKeyOf(i, j)));
 }
 /** Set off down a maze corridor, as far as the next fork. */
 function mazeGo(d) {
@@ -692,7 +776,7 @@ const handlers = {
   getState: () => st,
   onBecomeHost() {
     host ||= new Host(st);
-    host.st = st;
+    host.st = st; setMix(st.mix);
     st.order = net.order;
     host.assignRoles();
     gotState = true;
@@ -702,6 +786,7 @@ const handlers = {
     if (data.ver !== VERSION) versionClash();
     data.jobs ||= [];
     st = data; host = null; gotState = true;
+    setMix(st.mix);
     if (first) {
       lastEv = st.evId;
       // This device's own copy of the city may hold work the host has not seen: offer it, and the host keeps the best of both.
@@ -791,6 +876,7 @@ const handlers = {
     else if (kind === 'offer') host.offer(data);
     else if (kind === 'hold') host.hold(data);
     else if (kind === 'vote') host.vote(from, data);
+    else if (kind === 'team') host.teamAct(from, data);
     else if (kind === 'grab') {
       const it = host.grab(from, data || {});
       if (it) from === net.selfId ? grant(it.t) : net.sendTo(from, 'grant', { t: it.t });
@@ -898,7 +984,7 @@ function hostCity(id) {
   const saved = id && loadWorlds()[id];
   const world = saved ? { id, key: saved.key, name: saved.name } : { id: rid(), key: rid(), name: `${P.name}'s city` };
   st = newState();
-  if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total, rooms: { ...saved.rooms }, built: saved.built | 0, next: saved.next || null, gen: saved.gen | 0 });
+  if (saved) Object.assign(st, { d: saved.d, have: saved.have.slice(), total: saved.total, rooms: { ...saved.rooms }, built: saved.built | 0, next: saved.next || null, gen: saved.gen | 0, mix: saved.mix });
   host = new Host(st);
   net.open(world);
   enterCity();
@@ -1021,6 +1107,12 @@ function hostTick() {
   if (!host || !net.isHost) return;
   st.order = net.order; st.w = net.world.id; st.wn = net.world.name; st.ver = VERSION;
   host.tick(dt);
+  // The team building of this neighborhood: who is inside it, and who is connected and not away.
+  const fid = `${st.d}:5`, fk = isFinale(st.d, 5) && !finaleShut(fid) && !roomDone(roomKeyOf(st.d, 5)) ? roomKeyOf(st.d, 5) : '';
+  const there = id => (id === net.selfId ? inside?.id === fid && !inside.job : (o => !!o && o.in === fid && o.scene === 'team' && now - o.at < 6000)(others.get(id)));
+  const awake = id => (id === net.selfId ? !document.hidden : !others.get(id)?.away);
+  host.teamTick(dt, fk, fk ? missionFor(st.d, 5).team : '', fk ? net.order.filter(there) : [], net.order.filter(awake));
+  setMix(st.mix);
   net.broadcast('state', st);
   handleEvents();
 }
@@ -1277,6 +1369,7 @@ function updatePrompt() {
   if (engaged) {
     // a runaway (thief, pet, penguin) holds still for as long as someone is typing at it
     if (c.job && JOBS[c.job.t].kind === 'run' && performance.now() - heldAt > 1000) { heldAt = performance.now(); net.toHost('hold', { job: c.job.id }); }
+    if (inside && !c.job && inside.m.game === 'team') { teamPrompt(); return c.zone; }
     if (choosing()) { if (!CH.opts && !inside.g.path.length) dealChoices(); return c.zone; }
     if (!T.p) {
       T.key = engaged; T.site = c.zone; T.jobType = c.job ? c.job.t : -1;
@@ -1307,7 +1400,7 @@ function updatePrompt() {
   } else if (inside && inside.m.game !== 'furnish') {
     const m = inside.m;
     hint = !c.base ? 'All done here! Press Enter to go back outside.'
-      : (m.game === 'maze' ? `Press Enter to start looking for ${m.goal}.` : m.game === 'run' ? `Press Enter to start running to ${m.goal}.` : `Press Enter to start fetching things for ${m.who}.`) + '  (Q to go outside)';
+      : (m.game === 'maze' ? `Press Enter to start looking for ${m.goal}.` : m.game === 'run' ? `Press Enter to start running to ${m.goal}.` : m.game === 'order' ? `Press Enter to start fetching things for ${m.who}.` : m.game === 'team' ? 'Press Enter when you are ready. It starts when the whole team is in.' : `Press Enter to start helping ${m.who}.`) + '  (Q to go outside)';
   } else if (inside) {
     const sp = inside.near, all = inside.placed >= inside.m.items.length;
     const pk = inside.m.pick;
@@ -1323,6 +1416,8 @@ function updatePrompt() {
   else if (c.job) hint = `Press Enter to help. ${JOBS[c.job.t].hint}`;
   else if (c.base) hint = 'Press Enter to start building here.';
   else if (doorId && jobIn(doorId)) hint = `${JOBS[jobIn(doorId).t].icon} Trouble inside! Press Enter to go in and help.`;
+  else if (doorId && finaleShut(doorId)) hint = '🔒 The team building. It opens when the five other neighbors here have been helped.';
+  else if (doorId && isFinale(...doorId.split(':').map(Number)) && !roomDone(roomKey(doorId))) hint = '🤝 The team building is open! Everyone goes in together. Press Enter.';
   else if (doorId) hint = roomDone(roomKey(doorId)) ? '🚪 Press Enter to visit.' : '🚪 Press Enter to go in and help.';
   else if (district(st.d).sites.every((s, k) => st.have[k] >= s.need)) hint = 'All built! Now go inside each ❗ building and help. Press Enter for the nearest one.';
   else hint = 'Walk to a glowing circle. Press Enter for the nearest one.';
@@ -1378,7 +1473,8 @@ function pressEnter() {
     if (sp.kind === 'door') leaveBuilding();
     else if (sp.kind === 'npc') { inside.talk = 7; if (inside.m.pick === 'memory') inside.peek = 6; npc(inside.placed >= inside.m.items.length ? `m_${inside.m.id}_done` : `m_${inside.m.id}`); }
     else if (inside.mask >> sp.i & 1) { inside.wig = { i: sp.i, t: 0.6 }; beep(700 + sp.i * 80, 0.12, 'triangle', 0.07); }
-  } else if (doorId) enterBuilding(doorId);
+  } else if (doorId && finaleShut(doorId)) { toast('🔒 This one is for the whole team. Help the five other neighbors here first, then everyone goes in together.'); beep(220, 0.14, 'triangle', 0.06); }
+  else if (doorId) enterBuilding(doorId);
   else autoWalk();
 }
 
@@ -1532,6 +1628,13 @@ function frame(now) {
       if (inside.m.game === 'order' && CH.opts) { CH.opts = null; $('prompt').innerHTML = ''; } // deal again around the new item
     }
     if (inside.placed >= 6 && !inside.fin) finishRoom();
+    if (inside.m.game === 'quiz' && !inside.job && engaged && inside.placed < 6) {
+      const fun = inside.m.fun;
+      if (fun === 'tune' && g.play < G.tuneLen(g, inside.placed)) { const hz = G.tunePlay(g, inside.placed, dt); if (hz) beep(hz, 0.4, 'triangle', 0.1); }
+      else if (fun === 'tune') g.lit = -1;
+      // the rabbit stays put for about as long as this player needs to type a word, and waits once they have begun
+      if (fun === 'pop' && !CH.buf && (g.wait += dt) > (g.labels[g.hole] || 'abcdef').length / (Math.min(8, Math.max(0.4, P.cps || 1.2)) * 0.6) + 4) { g.hole = (g.hole + 1 + ((Math.random() * 3) | 0)) % 4; g.wait = 0; }
+    }
     if (inside.m.game === 'order' && !inside.job) {
       for (const k in g.open) g.open[k] = Math.max(0, g.open[k] - dt); // boxes close again after a look
       if (inside.m.fun === 'boxes' && inside.placed < 6) g.intro = Math.min(G.boxIntroLen(g), g.intro + dt); // shown, boxed, then shuffled
@@ -1641,7 +1744,7 @@ function frame(now) {
     const mates = matesHere(now); // others in this same building, doing the same thing
     const colorOf = o => COLORS[o.color % COLORS.length];
     const drawMate = (o, x, y) => drawPlayer(ctx, { ...o, boat: false }, x, y, now / 1000);
-    if (job || inside.m.game !== 'furnish') G.drawGame(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, g: inside.g, placed: inside.placed, pop: inside.pop, opts: CH.opts ? CH.opts.map(o => o.id) : [], job, out: inside.out, nearF: inside.nearF, x: inside.x, y: inside.y, drawMe, mates, drawMate, mask: inside.mask, want: inside.want, colorOf });
+    if (job || inside.m.game !== 'furnish') G.drawGame(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, g: inside.g, placed: inside.placed, pop: inside.pop, opts: CH.opts ? CH.opts.map(o => o.id) : [], job, out: inside.out, nearF: inside.nearF, x: inside.x, y: inside.y, drawMe, mates, drawMate, mask: inside.mask, want: inside.want, colorOf, team: st.team, meId: net.selfId, roomKey: roomKey(inside.id) });
     else drawInterior(ctx, { w: vw, h: vh, ph: $('panel').offsetHeight, t: now / 1000, m: inside.m, placed: inside.placed, pop: inside.pop, x: inside.x, y: inside.y, near: inside.near, talk: inside.talk, wig: inside.wig, drawMe, mates, drawMate, mask: inside.mask, want: inside.want, last: inside.last, colorOf, perm: inside.perm, peek: inside.peek });
     updateHud(now);
     return;

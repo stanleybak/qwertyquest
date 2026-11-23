@@ -6,6 +6,7 @@
 // more: { pick } for a furnish room where the right thing must be chosen for each spot
 //   ('memory': the plan is shown, then hidden; 'color': each spot has a color tag to match),
 //   { rival: [emoji, name] } for a run that is a race,
+//   { fun } for a fetch game or a choosing game, { team } for the kind of team game,
 //   { fun } for a fetch game: 'belt' (things ride past on a belt), 'boxes' (things are hidden in closed boxes).
 const M = (id, who, face, title, ask, thanks, items, wall, floor, game = 'furnish', goal = '', more = {}) => ({ id, who, face, title, ask, thanks, items, wall, floor, game, goal, ...more });
 /** Shelf tag colors for a 'color' room, one per item. */
@@ -39,8 +40,40 @@ export const MISSIONS = [
   ],
 ];
 
+// Five more neighbors, each with a small game of choosing (see games.js). No recorded voices yet.
+const MORE = [
+  M('zookeeper', 'Keeper Zoe', '🧑‍🌾', 'The little zoo', 'Oh dear, the animals got out! Help me get each one back to where it lives.',
+    'Everyone is home, safe and sound. Thank you!', ['🐟', '🐙', '🐘', '🦒', '🦅', '🦋'], '#dff3e3', '#a9cf9a', 'quiz', '', { fun: 'homes', homes: ['🌊', '🌳', '☁️'], where: [0, 0, 1, 1, 2, 2] }),
+  M('toymaker', 'Mr. Cog', '🧑‍🔧', 'The toy workshop', 'One toy in every row came out wrong. Can you spot the odd one out?',
+    'Every toy is just right now. Thank you!', ['🧸', '🪀', '🚂', '🎲', '🪁', '🤖'], '#ffe3d1', '#d6a184', 'quiz', '', { fun: 'odd', pairs: [['🐱', '🐶'], ['🍎', '🍐'], ['⚽', '🏀'], ['🚗', '🚕'], ['🌼', '🌻'], ['🧸', '🤖']] }),
+  M('conductor', 'Maestra Viva', '🧑‍🎤', 'The music hall', 'Listen to my little tune, then play it back in the same order!',
+    'Bravo! What a concert!', ['🥁', '🎺', '🎻', '🎹', '🎷', '🪘'], '#ead9f7', '#9c7fc0', 'quiz', '', { fun: 'tune' }),
+  M('pirate', 'Captain Patch', '🧔', 'The treasure cove', 'Arr! I buried three treasures and lost the map. Dig, and follow the arrows!',
+    'Shiver me timbers, ye found them all!', ['💎', '👑', '🪙', '💎', '👑', '🪙'], '#cfeaf5', '#e3cf9a', 'quiz', '', { fun: 'dig' }),
+  M('gardener', 'Gran Fern', '🧑‍🌾', 'The garden', 'That rabbit is after my carrots! Catch him each time he pops up.',
+    'My carrots are safe. Thank you, dear!', ['🥕', '🥕', '🥕', '🥕', '🥕', '🥕'], '#d8f0ff', '#9bc27a', 'quiz', '', { fun: 'pop' }),
+];
+// The last building of a neighborhood is for the whole team: it opens when the
+// other five neighbors are helped, and starts when everyone connected is inside.
+const TEAMS = [
+  M('teamball', 'Coach Sky', '🧑‍🏫', 'The gym', 'Everybody in! Pass the ball around the whole team.',
+    'What a team! Great passing, everyone!', [], '#ffe9c7', '#d9b27a', 'team', '', { team: 'ball' }),
+  M('teamlift', 'Mayor Bell', '🧑‍💼', 'The bell tower', 'It takes everyone to raise the big bell. All together now: heave!',
+    'Ding dong! The bell is up. Well done, all of you!', [], '#e3e8f5', '#a9a3b8', 'team', '', { team: 'lift' }),
+  M('teampump', 'Pilot Puff', '🧑‍✈️', 'The balloon field', 'Pump up the balloon before the air leaks out! Everyone pump!',
+    'Up, up and away! Thank you, team!', [], '#d6efff', '#9ccf8a', 'team', '', { team: 'pump' }),
+];
+const POOL = [MISSIONS[0][0], MORE[0], MISSIONS[1][0], MISSIONS[0][1], MORE[2], MISSIONS[1][1], MISSIONS[2][0], MORE[3], MISSIONS[2][1], MORE[4], MISSIONS[3][0], MISSIONS[3][1], MORE[1]];
+// A city says from which neighborhood on the bigger mix of games applies, so
+// neighborhoods finished (or begun) before it existed keep the games they had.
+let MIX = Infinity;
+export const setMix = n => { MIX = Number.isInteger(n) ? n : Infinity; };
+/** Is building `k` of neighborhood `di` the team building? */
+export const isFinale = (di, k) => di >= MIX && k === 5;
+
 /** The mission inside building `k` of district `di`. Same on every device. */
 export function missionFor(di, k) {
+  if (di >= MIX) return k === 5 ? TEAMS[di % 3] : POOL[(di * 5 + k) % POOL.length];
   // Walk through all eight neighbors in turn, so each neighborhood has every kind of game.
   const n = di * 6 + k;
   return MISSIONS[[0, 1, 1, 0, 2, 2, 3, 3][n % 8]][[0, 0, 1, 1, 0, 1, 0, 1][n % 8]];

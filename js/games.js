@@ -204,8 +204,75 @@ export function newGame(m, id, placed) {
     g.start = []; at.forEach((it, p) => { g.start[it] = p; });
     g.intro = placed >= 6 ? 99 : 0;
   }
+  else if (m.game === 'quiz') newQuiz(m, id, g);
   else g.labels = {};
   return g;
+}
+
+// ---------- five small games of choosing ----------
+// homes: which home does this animal live in?   odd: which one in the row is different?
+// tune: play back a tune of one, two, then three notes.   dig: three treasures in seven
+// spots, each miss pointing the way.   pop: catch the rabbit at the hole it pops out of.
+const PITCH = [262, 330, 392, 523];
+function newQuiz(m, id, g) {
+  const r = rng(seedOf(id) + 23), n = k => (r() * k) | 0;
+  g.labels = {}; g.seq = orderSeq(id);
+  if (m.fun === 'odd') g.at = g.seq.map(() => n(5));
+  if (m.fun === 'tune') { g.song = [1, 2, 3].map(len => Array.from({ length: len }, () => n(4))); g.play = 0; g.sung = -1; g.lit = -1; }
+  if (m.fun === 'dig') { g.gold = [n(7), n(7), n(7)]; g.dug = {}; }
+  if (m.fun === 'pop') { g.hole = n(4); g.wait = 0; }
+}
+/** Which tune a player is on, and how far into it, from the notes played so far. */
+export const tuneAt = placed => (placed < 1 ? [0, 0] : placed < 3 ? [1, placed - 1] : [2, placed - 3]);
+/** How long the tune being learned takes to play. */
+export const tuneLen = (g, placed) => g.song[tuneAt(placed)[0]].length * 0.75 + 0.5;
+/** Play the tune along as time passes; returns the pitch of a note that starts now, or 0. */
+export function tunePlay(g, placed, dt) {
+  const song = g.song[tuneAt(placed)[0]], was = Math.floor(g.play / 0.75);
+  g.play += dt;
+  const now = Math.floor(g.play / 0.75);
+  g.lit = now < song.length && g.play % 0.75 < 0.55 ? song[now] : -1;
+  return (now !== was || g.play === dt) && now < song.length ? PITCH[song[now]] : 0;
+}
+export const pitchOf = i => PITCH[i] || 440;
+/** The choices on offer. */
+export function quizOpts(m, g, placed) {
+  const ids = k => Array.from({ length: k }, (_, i) => i);
+  if (m.fun === 'homes') return m.homes.map((h, i) => ({ id: i, icon: h }));
+  if (m.fun === 'odd') { const p = m.pairs[g.seq[placed]]; return ids(5).map(i => ({ id: i, icon: i === g.at[placed] ? p[1] : p[0] })); }
+  if (m.fun === 'tune') return ids(4).map(i => ({ id: i, icon: m.items[i] }));
+  if (m.fun === 'dig') return ids(7).filter(i => !g.dug[i]).map(i => ({ id: i, icon: LANE_ICONS[i] }));
+  return ids(4).map(i => ({ id: i, icon: LANE_ICONS[i] }));
+}
+/** The right choice. */
+export function quizRight(m, g, placed) {
+  if (m.fun === 'homes') return m.where[g.seq[placed]];
+  if (m.fun === 'odd') return g.at[placed];
+  if (m.fun === 'tune') { const [s, i] = tuneAt(placed); return g.song[s][i]; }
+  if (m.fun === 'dig') return g.gold[placed >> 1];
+  return g.hole;
+}
+/** What to do, in a line. */
+export function quizAsk(m, g, placed) {
+  if (m.fun === 'homes') return `Where does ${m.items[g.seq[placed]]} live? Type that home's word.`;
+  if (m.fun === 'odd') return 'One of these is different. Type its word.';
+  if (m.fun === 'tune') return `Play the tune back: note ${tuneAt(placed)[1] + 1} of ${g.song[tuneAt(placed)[0]].length}. Type that instrument's word.`;
+  if (m.fun === 'dig') return 'Where is the treasure buried? Type a spot\'s word to dig there.';
+  return 'Quick, catch the rabbit! Type the word of the hole he is in.';
+}
+/** A wrong choice: change what needs changing and say why. */
+export function quizMiss(m, g, pick, right) {
+  if (m.fun === 'homes') return 'That is not its home. Try another!';
+  if (m.fun === 'odd') return 'That one is the same as the others. Look again!';
+  if (m.fun === 'tune') { g.play = 0; return 'Not that one. Listen to the tune again.'; }
+  if (m.fun === 'dig') { g.dug[pick] = right > pick ? '➡️' : '⬅️'; return `Nothing here. The treasure is further ${g.dug[pick]}`; }
+  g.hole = (g.hole + 1 + ((Math.random() * 3) | 0)) % 4; g.wait = 0;
+  return 'Missed! He popped up somewhere else.';
+}
+/** A right choice: set up what comes next. */
+export function quizHit(m, g) {
+  if (m.fun === 'dig') g.dug = {};
+  if (m.fun === 'pop') { g.hole = (g.hole + 1 + ((Math.random() * 3) | 0)) % 4; g.wait = 0; }
 }
 
 // ---------- fires and leaks ----------
@@ -278,7 +345,7 @@ function drawMaze(ctx, v, F) {
   if (g.hasKey && !found) emoji(ctx, '🗝️', X + cw * 0.28, Y - ch * 0.25, big * 0.45);
 }
 
-export const LANE_ICONS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣'];
+export const LANE_ICONS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣'];
 const BOX_SHOW = 3.5, BOX_SHUT = 0.8, BOX_SWAP = 1.1;
 /** How long the lab's show-and-shuffle takes. */
 export const boxIntroLen = g => BOX_SHOW + BOX_SHUT + g.swaps.length * BOX_SWAP;
@@ -394,6 +461,87 @@ function drawOrder(ctx, v, F) {
   v.drawMe(R.fx(0.52), R.fy(0.6));
 }
 
+/** The neighbor on the left, and how far along things are. */
+function helper(ctx, v, R, count) {
+  const { m, t } = v, nx = R.fx(0.1), ny = R.floorY + 6;
+  emoji(ctx, m.face, nx, ny - 8 + Math.sin(t * 3) * 2, 78);
+  ctx.font = '800 16px system-ui'; ctx.fillStyle = '#0007'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(m.who, nx, ny + 54);
+  if (count) ctx.fillText(count, R.fx(0.24), ny + 54);
+}
+function drawQuiz(ctx, v, F) {
+  const { m, g, t } = v, R = room(ctx, F, m), p = Math.min(6, v.placed), done = p >= 6;
+  title(ctx, F, m.title.toUpperCase());
+  helper(ctx, v, R, `${p} of 6`);
+  const y = F.y0 + F.H * 0.46, X = (i, n) => R.fx(0.4 + (n > 1 ? i / (n - 1) : 0.5) * 0.5);
+  const num = (i, x, yy) => { if (v.opts.includes(i)) emoji(ctx, LANE_ICONS[i], x, yy, 20); };
+  if (m.fun === 'homes') {
+    m.homes.forEach((h, i) => {
+      emoji(ctx, h, X(i, 3), y - 10, 58);
+      g.seq.slice(0, p).filter(a => m.where[a] === i).forEach((a, k) => emoji(ctx, m.items[a], X(i, 3) - 18 + k * 36, y + 42, 30)); // the ones already home
+    });
+    if (!done) emoji(ctx, m.items[g.seq[p]], R.fx(0.25), y - 6 + Math.sin(t * 5) * 5, 52);
+  } else if (m.fun === 'odd') {
+    const pair = m.pairs[g.seq[Math.min(5, p)]];
+    for (let i = 0; i < 5; i++) emoji(ctx, done ? m.items[i] : i === g.at[p] ? pair[1] : pair[0], X(i, 5), y + Math.sin(t * 3 + i) * 3, 50);
+  } else if (m.fun === 'tune') {
+    for (let i = 0; i < 4; i++) {
+      const lit = g.lit === i;
+      if (lit) { ctx.fillStyle = '#fff8'; ctx.beginPath(); ctx.arc(X(i, 4), y, 44, 0, 7); ctx.fill(); }
+      emoji(ctx, m.items[i], X(i, 4), y - (lit ? 8 : 0), lit ? 66 : 50);
+    }
+    emoji(ctx, done ? '🎶' : '🎵'.repeat(tuneAt(p)[1]) || '👂', R.fx(0.25), y, 30);
+  } else if (m.fun === 'dig') {
+    for (let i = 0; i < 7; i++) {
+      const x = X(i, 7);
+      ctx.fillStyle = '#c9a96a'; ctx.beginPath(); ctx.ellipse(x, y + 14, 26, 12, 0, 0, 7); ctx.fill();
+      if (g.dug[i]) emoji(ctx, g.dug[i], x, y - 6, 30); else emoji(ctx, done ? '🕳️' : '❌', x, y - 4, 22);
+      if (!g.dug[i] && !done) emoji(ctx, LANE_ICONS[i], x, y + 36, 18);
+    }
+    for (let k = 0; k < p >> 1; k++) emoji(ctx, m.items[k], R.fx(0.2) + k * 30, y - 6, 30); // treasures found
+  } else {
+    for (let i = 0; i < 4; i++) {
+      const x = X(i, 4);
+      ctx.fillStyle = '#5b4632'; ctx.beginPath(); ctx.ellipse(x, y + 20, 34, 13, 0, 0, 7); ctx.fill();
+      if (i === g.hole && !done) emoji(ctx, '🐰', x, y - 8 - Math.abs(Math.sin(t * 5)) * 8, 46);
+      emoji(ctx, LANE_ICONS[i], x, y + 46, 20);
+    }
+    for (let k = 0; k < 6 - p; k++) emoji(ctx, '🥕', R.fx(0.19) + (k % 3) * 22, y - 12 + ((k / 3) | 0) * 24, 22); // carrots still to save
+  }
+  v.mates.forEach((o, n) => v.drawMate(o, R.fx(0.62 + n * 0.09), R.fy(0.7)));
+  v.drawMe(R.fx(0.52), R.fy(0.7));
+}
+
+/** The team building: everyone in a row, and the one thing they are all working on. */
+function drawTeam(ctx, v, F) {
+  const { m, t } = v, R = room(ctx, F, m), tm = v.team && v.team.key === v.roomKey ? v.team : null, on = !!tm?.on;
+  title(ctx, F, m.title.toUpperCase() + (v.placed >= 6 ? '' : on ? '' : '   🔒 waiting for the whole team'));
+  helper(ctx, v, R, '');
+  const ids = (on ? [...tm.here] : [v.meId, ...v.mates.map(o => o.id)]).sort(), n = ids.length;
+  const px = i => R.fx(0.34 + (n > 1 ? i / (n - 1) : 0.5) * 0.52), py = R.fy(0.6), top = F.y0 + 64, mid = R.fx(0.6);
+  if (m.team === 'lift') { // the bell rises a notch each round
+    const h = on ? tm.n / tm.goal : v.placed >= 6 ? 1 : 0, by = R.floorY - 30 - h * (R.floorY - top - 40);
+    ctx.strokeStyle = '#7a6a55'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(mid, top - 20); ctx.lineTo(mid, by - 26); ctx.stroke();
+    emoji(ctx, '🔔', mid + Math.sin(t * 3) * (on ? 3 : 0), by, 64);
+  } else if (m.team === 'pump') { // the balloon fills, and leaks
+    const lvl = on ? tm.lvl : v.placed >= 6 ? 1 : 0;
+    emoji(ctx, '🎈', mid, top + 40 - lvl * 10 + Math.sin(t * 2) * 3, 30 + lvl * 80);
+    ctx.fillStyle = '#0002'; ctx.fillRect(R.fx(0.34), top - 16, F.W * 0.52, 12);
+    ctx.fillStyle = lvl > 0.8 ? '#2fae66' : '#ff8a3d'; ctx.fillRect(R.fx(0.34), top - 16, F.W * 0.52 * lvl, 12);
+  }
+  ids.forEach((id, i) => {
+    const o = v.mates.find(x => x.id === id);
+    if (id === v.meId) v.drawMe(px(i), py); else if (o) v.drawMate(o, px(i), py);
+    if (!on) return;
+    if (m.team === 'ball' && tm.turn === id) emoji(ctx, '🏀', px(i) + 22, py - 96 - Math.abs(Math.sin(t * 6)) * 14, 34);
+    if (m.team === 'lift' && tm.did[id]) emoji(ctx, '💪', px(i), py - 104, 26);
+  });
+  if (on && m.team !== 'pump') {
+    ctx.font = '800 18px system-ui'; ctx.fillStyle = '#0008'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(m.team === 'ball' ? `passes: ${tm.n} of ${tm.goal}` : `heaves: ${tm.n} of ${tm.goal}`, F.x0 + F.W - 20, F.y0 + 22);
+  }
+}
+
 function drawRescue(ctx, v, F) {
   const { m, t, job } = v, R = room(ctx, F, m), fire = job.t === 0;
   title(ctx, F, fire ? '🔥 FIRE! Walk to each fire and put it out.' : '💦 BURST PIPES! Walk to each leak and fix it.');
@@ -426,5 +574,7 @@ export function drawGame(ctx, v) {
   if (v.job) drawRescue(ctx, v, F);
   else if (v.m.game === 'maze') drawMaze(ctx, v, F);
   else if (v.m.game === 'run') drawRun(ctx, v, F);
+  else if (v.m.game === 'quiz') drawQuiz(ctx, v, F);
+  else if (v.m.game === 'team') drawTeam(ctx, v, F);
   else drawOrder(ctx, v, F);
 }
