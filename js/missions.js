@@ -40,7 +40,7 @@ export const MISSIONS = [
   ],
 ];
 
-// Five more neighbors, each with a small game of choosing (see games.js). No recorded voices yet.
+// Five more neighbors, each with a small game of choosing (see games.js). Lines match tools/build_voices.py.
 const MORE = [
   M('zookeeper', 'Keeper Zoe', '🧑‍🌾', 'The little zoo', 'Oh dear, the animals got out! Help me get each one back to where it lives.',
     'Everyone is home, safe and sound. Thank you!', ['🐟', '🐙', '🐘', '🦒', '🦅', '🦋'], '#dff3e3', '#a9cf9a', 'quiz', '', { fun: 'homes', homes: ['🌊', '🌳', '☁️'], where: [0, 0, 1, 1, 2, 2] }),

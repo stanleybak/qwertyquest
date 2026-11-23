@@ -55,6 +55,13 @@ CAST = {
     "skier": ("shimmer", "A cheerful grown-up bundled up against the cold."),
     "farmer": ("onyx", "A warm, folksy farmer with a slow country voice."),
     "teacher": ("sage", "A kind school teacher."),
+    "zookeeper": ("nova", "A cheerful, slightly out-of-breath zookeeper who loves her animals."),
+    "toymaker": ("ballad", "A gentle old toymaker. Thoughtful and twinkly."),
+    "conductor": ("coral", "A dramatic orchestra conductor. Musical and grand, with a flourish."),
+    "pirate": ("onyx", "A friendly cartoon pirate captain. Gruff and jolly, never scary."),
+    "gardener": ("sage", "A sprightly old gardener. Warm, a little exasperated with a rabbit."),
+    "coach": ("ash", "An upbeat gym coach cheering on a team of children."),
+    "pilot": ("verse", "A jaunty hot-air balloon pilot. Breezy and excited."),
 }
 
 # (clip id, character, text, extra direction for this line)
@@ -89,6 +96,22 @@ LINES = [
     ("m_guide_done", "guide", "Magnificent. The crown is back where it belongs!", ""),
     ("m_captain", "captain", "Ahoy! The boat is leaving! Run down the dock and hop over everything in your way, matey!", ""),
     ("m_captain_done", "captain", "Shipshape! You made it aboard. Thank ye kindly!", ""),
+    ("m_zookeeper", "zookeeper", "Oh dear, the animals got out! Help me get each one back to where it lives.", "Flustered."),
+    ("m_zookeeper_done", "zookeeper", "Everyone is home, safe and sound. Thank you!", "Relieved and happy."),
+    ("m_toymaker", "toymaker", "One toy in every row came out wrong. Can you spot the odd one out?", ""),
+    ("m_toymaker_done", "toymaker", "Every toy is just right now. Thank you!", "Pleased."),
+    ("m_conductor", "conductor", "Listen to my little tune, then play it back in the same order!", ""),
+    ("m_conductor_done", "conductor", "Bravo! What a concert!", "Delighted, applauding."),
+    ("m_pirate", "pirate", "Arr! I buried three treasures and lost the map. Dig, and follow the arrows!", ""),
+    ("m_pirate_done", "pirate", "Shiver me timbers, ye found them all!", "Overjoyed."),
+    ("m_gardener", "gardener", "That rabbit is after my carrots! Catch him each time he pops up.", ""),
+    ("m_gardener_done", "gardener", "My carrots are safe. Thank you, dear!", "Relieved."),
+    ("m_teamball", "coach", "Everybody in! Pass the ball around the whole team.", "Calling out across a gym."),
+    ("m_teamball_done", "coach", "What a team! Great passing, everyone!", "Cheering."),
+    ("m_teamlift", "mayor", "It takes everyone to raise the big bell. All together now: heave!", ""),
+    ("m_teamlift_done", "mayor", "Ding dong! The bell is up. Well done, all of you!", "Proud."),
+    ("m_teampump", "pilot", "Pump up the balloon before the air leaks out! Everyone pump!", "Urgent and fun."),
+    ("m_teampump_done", "pilot", "Up, up and away! Thank you, team!", "Thrilled."),
 ]
 
 KEY_NAMES = {";": "semicolon", ",": "comma", ".": "period", "/": "slash", " ": "space", "'": "apostrophe"}
